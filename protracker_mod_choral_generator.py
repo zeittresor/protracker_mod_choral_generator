@@ -2,9 +2,11 @@
 # source: github.com/zeittresor
 
 #!/usr/bin/env python3
+import argparse
 import math
 import os
 import random
+import re
 import struct
 import time
 from pathlib import Path
@@ -22,6 +24,8 @@ CHROMA = ["C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"
 OCTAVES = [1, 2, 3]
 CHROMATIC = [f"{n}{o}" for o in OCTAVES for n in CHROMA]
 CHROMATIC_SET = set(CHROMATIC)
+
+DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
 
 def note_shift(note: str, semitones: int) -> str:
     i = CHROMATIC.index(note)
@@ -51,9 +55,9 @@ def inst_header(name: str, sample_bytes: bytes, finetune=0, volume=48, loop_star
     )
 
 def make_pianoish_sample(rng: random.Random, length=32768, sr=8287) -> bytes:
-    f0 = rng.choice([220.0, 246.94, 261.63, 293.66])  # slight variation in tone base
+    f0 = rng.choice([220.0, 246.94, 261.63, 293.66])
     attack = int(sr * rng.uniform(0.004, 0.008))
-    decay = rng.uniform(0.9, 1.6)  # longer sustain for "andacht"
+    decay = rng.uniform(0.9, 1.6)
     detune = rng.uniform(1.002, 1.008)
 
     h2 = rng.uniform(0.35, 0.50)
@@ -88,12 +92,10 @@ def make_pianoish_sample(rng: random.Random, length=32768, sr=8287) -> bytes:
     return bytes(data)
 
 def major_scale(root_note: str) -> list[str]:
-    # root_note is e.g. "C-2" or "G-2"
     intervals = [0, 2, 4, 5, 7, 9, 11]
     return [note_shift(root_note, i) for i in intervals]
 
 def triad_from_degree(scale: list[str], degree: int, octave_bias: int = 0) -> tuple[str, str, str]:
-    # degree: 0..6 (I..VII)
     r = scale[degree % 7]
     t = scale[(degree + 2) % 7]
     f = scale[(degree + 4) % 7]
@@ -104,23 +106,17 @@ def triad_from_degree(scale: list[str], degree: int, octave_bias: int = 0) -> tu
     return r, t, f
 
 def pick_progression(rng: random.Random) -> list[int]:
-    # Degrees in major: I(0), ii(1), iii(2), IV(3), V(4), vi(5)
-    # Churchy-safe cadences, end on I.
-    start = rng.choice([0, 5])  # I or vi
+    start = rng.choice([0, 5])
     mid_pool = [1, 3, 4, 5, 2]
     prog = [start]
     for _ in range(2):
         prog.append(rng.choice(mid_pool))
-    prog.append(rng.choice([4, 3]))  # set up cadence
+    prog.append(rng.choice([4, 3]))
     return prog
 
 def build_bar_melody(rng: random.Random, scale: list[str], chord: tuple[str, str, str], base_note: str) -> list[tuple[str | None, int]]:
-    # 16 rows per bar. Return list of (note_or_None, duration_rows).
     chord_tones = list(chord)
-    if base_note in chord_tones:
-        current = base_note
-    else:
-        current = rng.choice(chord_tones)
+    current = base_note if base_note in chord_tones else rng.choice(chord_tones)
 
     events = []
     remaining = 16
@@ -160,7 +156,7 @@ def build_bar_melody(rng: random.Random, scale: list[str], chord: tuple[str, str
         events[0] = (rng.choice(chord_tones), events[0][1])
     return events
 
-def make_patterns(rng: random.Random):
+def make_patterns(rng: random.Random, enable_slowdown: bool = True):
     NUM_CH = 4
     ROWS = 64
     patterns = []
@@ -168,7 +164,6 @@ def make_patterns(rng: random.Random):
     key_root = rng.choice(["C-2", "G-2", "F-2", "D-2"])
     scale = major_scale(key_root)
 
-    # Build 6 patterns: intro, theme, variation, Ruhephase, reprise, ending
     for _ in range(6):
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
         patterns.append(pat)
@@ -176,21 +171,19 @@ def make_patterns(rng: random.Random):
     def set_cell(p, row, ch, note=None, sample=1, effect=0x00, param=0x00):
         patterns[p][row][ch] = (note, sample if note is not None else 0, effect, param)
 
-    # Speed/tempo at start
-    set_cell(0, 0, 0, None, 0, 0x0F, 0x06)  # speed 6
-    set_cell(0, 0, 1, None, 0, 0x0F, 0x7D)  # tempo 125
+    set_cell(0, 0, 0, None, 0, 0x0F, 0x06)
+    set_cell(0, 0, 1, None, 0, 0x0F, 0x7D)
 
-    # Chord plans (per pattern: 4 bars)
     progs = [
         pick_progression(rng),
-        [0, 3, 0, 4],                          # I IV I V
-        [5, 3, 4, 0],                          # vi IV V I
-        [3, 0, 4, 0],                          # "Ruhe" base: IV I V I
-        [0, 2, 3, 4],                          # I iii IV V
-        [5, 3, 4, 0],                          # ending cadence
+        [0, 3, 0, 4],
+        [5, 3, 4, 0],
+        [3, 0, 4, 0],
+        [0, 2, 3, 4],
+        [5, 3, 4, 0],
     ]
 
-    last_note = rng.choice([note_shift(key_root, 12), note_shift(key_root, 14)])  # around octave 3
+    last_note = rng.choice([note_shift(key_root, 12), note_shift(key_root, 14)])
 
     for p_idx in range(6):
         prog = progs[p_idx]
@@ -198,29 +191,18 @@ def make_patterns(rng: random.Random):
             r0 = bar * 16
 
             root, third, fifth = triad_from_degree(scale, deg, octave_bias=0)
-            # Voice the chord into usable registers:
-            bass = note_shift(root, -12)   # down an octave
-            mid  = root
-            top  = fifth
+            bass = note_shift(root, -12)
+            top = fifth
 
-            # Ensure in our supported range (C-1..B-3)
-            for n in [bass, mid, top, third]:
-                if n not in CHROMATIC_SET:
-                    pass
-
-            # Place chord (channels 1..3)
             set_cell(p_idx, r0, 1, top)
             set_cell(p_idx, r0, 2, bass)
             set_cell(p_idx, r0, 3, third)
 
-            # Optional gentle re-strike mid-bar
             if p_idx not in (3,) and rng.random() < 0.55:
                 set_cell(p_idx, r0 + 8, 1, top)
                 set_cell(p_idx, r0 + 8, 2, bass)
 
-            # Melody: channel 0
             if p_idx == 3:
-                # Ruhephase: long holds + silence
                 if bar == 0:
                     hold = rng.choice([third, fifth, note_shift(root, 12)])
                     hold = note_shift(hold, 12) if hold.endswith("2") else hold
@@ -237,7 +219,6 @@ def make_patterns(rng: random.Random):
                     hold = hold if hold in CHROMATIC_SET else note_shift(key_root, 12)
                     set_cell(p_idx, r0, 0, hold)
                 else:
-                    # final bar: small cadence movement then rest
                     a = note_shift(root, 12)
                     b = note_shift(third, 12)
                     a = a if a in CHROMATIC_SET else note_shift(key_root, 12)
@@ -250,7 +231,12 @@ def make_patterns(rng: random.Random):
                 chord_up = (note_shift(root, 12), note_shift(third, 12), note_shift(fifth, 12))
                 chord_up = tuple(n if n in CHROMATIC_SET else note_shift(key_root, 12) for n in chord_up)
 
-                bar_events = build_bar_melody(rng, scale=[note_shift(n, 12) for n in scale], chord=chord_up, base_note=last_note)
+                bar_events = build_bar_melody(
+                    rng,
+                    scale=[note_shift(n, 12) for n in scale],
+                    chord=chord_up,
+                    base_note=last_note
+                )
                 r = r0
                 for note, dur in bar_events:
                     if note is not None and note in CHROMATIC_SET:
@@ -258,7 +244,6 @@ def make_patterns(rng: random.Random):
                         last_note = note
                     r += dur
 
-            # Variation: arpeggio in channel 3 for pattern 2 + 4 sometimes
             if p_idx in (2, 4) and rng.random() < 0.75:
                 tones = [third, root, fifth, root]
                 tones = [note_shift(t, 12) if t.endswith("2") else t for t in tones]
@@ -266,8 +251,8 @@ def make_patterns(rng: random.Random):
                 for i in range(0, 16, 2):
                     set_cell(p_idx, r0 + i, 3, tones[(i // 2) % len(tones)])
 
-    # Ending tempo slowdown (pattern 5)
-    set_cell(5, 0, 0, None, 0, 0x0F, rng.choice([0x64, 0x5A, 0x50]))  # tempo 100/90/80
+    if enable_slowdown:
+        set_cell(5, 0, 0, None, 0, 0x0F, rng.choice([0x64, 0x5A, 0x50]))
 
     return patterns, key_root
 
@@ -282,20 +267,40 @@ def patterns_to_bytes(patterns):
             raise RuntimeError("Pattern size mismatch")
     return bytes(blob)
 
-def generate_mod(out_dir="mods_out", seed=None) -> Path:
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+def parse_order_string(order_str: str) -> list[int]:
+    parts = [p.strip() for p in re.split(r"[,\s]+", order_str.strip()) if p.strip()]
+    if not parts:
+        raise ValueError("Order is empty.")
+    order = []
+    for p in parts:
+        if not re.fullmatch(r"-?\d+", p):
+            raise ValueError(f"Invalid token '{p}'. Use numbers like: 0, 1, 2 ...")
+        order.append(int(p))
+    return order
+
+def validate_order(order: list[int], n_patterns: int = 6) -> None:
+    if len(order) > 128:
+        raise ValueError("Order is too long (max 128 positions).")
+    bad = [x for x in order if x < 0 or x >= n_patterns]
+    if bad:
+        raise ValueError(f"Order contains out-of-range pattern numbers {bad}. Allowed: 0..{n_patterns-1}")
+
+def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list[int] | None = None, enable_slowdown: bool = True) -> Path:
+    out_dir_p = Path(out_dir)
+    out_dir_p.mkdir(parents=True, exist_ok=True)
 
     if seed is None:
         seed = int(time.time() * 1000) ^ (os.getpid() << 8)
     rng = random.Random(seed)
 
     sample = make_pianoish_sample(rng)
-
-    patterns, key_root = make_patterns(rng)
+    patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown)
     pat_data = patterns_to_bytes(patterns)
 
-    order = [0, 1, 2, 3, 2, 4, 5]  # ~1 min, with Ruhephase + reprise + ending
+    if order is None:
+        order = parse_order_string(DEFAULT_ORDER_STR)
+    validate_order(order, n_patterns=len(patterns))
+
     song_len = len(order)
     order_table = bytes(order + [0] * (128 - len(order)))
 
@@ -303,7 +308,6 @@ def generate_mod(out_dir="mods_out", seed=None) -> Path:
     title_txt = f"{rng.choice(adjectives)} {rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
 
-    # Instruments (31). Only instrument 1 is used.
     insts = [inst_header("Piano-ish", sample, volume=48)]
     empty = b"\x00" * 22 + struct.pack(">H", 0) + bytes([0]) + bytes([0]) + struct.pack(">H", 0) + struct.pack(">H", 1)
     insts += [empty] * 30
@@ -313,20 +317,73 @@ def generate_mod(out_dir="mods_out", seed=None) -> Path:
     for ih in insts:
         mod += ih
     mod += bytes([song_len])
-    mod += bytes([0])  # restart pos
+    mod += bytes([0])
     mod += order_table
-    mod += b"M.K."     # 4 channels
+    mod += b"M.K."
     mod += pat_data
     mod += sample
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     fname = f"{title_txt.replace(' ', '_')}_{ts}_key_{key_root.replace('-', '').replace('#','s')}.mod"
-    path = out_dir / fname
+    path = out_dir_p / fname
     path.write_bytes(mod)
     return path
 
+def run_gui():
+    import tkinter as tk
+    from tkinter import messagebox
+
+    root = tk.Tk()
+    root.title("ProTracker MOD Choral Generator")
+
+    frm = tk.Frame(root, padx=10, pady=10)
+    frm.pack(fill="both", expand=True)
+
+    tk.Label(frm, text="Pattern order (comma-separated):").grid(row=0, column=0, sticky="w")
+
+    order_var = tk.StringVar(value=DEFAULT_ORDER_STR)
+    order_entry = tk.Entry(frm, textvariable=order_var, width=44)
+    order_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(2, 8))
+
+    slowdown_var = tk.BooleanVar(value=True)
+    slowdown_cb = tk.Checkbutton(frm, text="Enable slowdown in pattern 5 (ending)", variable=slowdown_var)
+    slowdown_cb.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 10))
+
+    out_label_var = tk.StringVar(value="")
+    out_label = tk.Label(frm, textvariable=out_label_var, anchor="w", justify="left")
+    out_label.grid(row=4, column=0, columnspan=2, sticky="we", pady=(8, 0))
+
+    def on_generate():
+        try:
+            order = parse_order_string(order_var.get())
+            validate_order(order, n_patterns=6)
+            p = generate_mod(order=order, enable_slowdown=slowdown_var.get())
+            out_label_var.set(f"Generated:\n{p}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    gen_btn = tk.Button(frm, text="Generate", command=on_generate, width=18)
+    gen_btn.grid(row=3, column=0, sticky="w")
+
+    quit_btn = tk.Button(frm, text="Quit", command=root.destroy, width=18)
+    quit_btn.grid(row=3, column=1, sticky="e")
+
+    frm.columnconfigure(0, weight=1)
+    frm.columnconfigure(1, weight=1)
+
+    root.mainloop()
+
 def main():
-    path = generate_mod()
+    ap = argparse.ArgumentParser(description="Generate churchy ProTracker .MOD files.")
+    ap.add_argument("-gui", action="store_true", help="Show GUI (order editor + generate button).")
+    ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown (pattern 5 tempo change) in CLI mode.")
+    args = ap.parse_args()
+
+    if args.gui:
+        run_gui()
+        return
+
+    path = generate_mod(enable_slowdown=not args.noslowdown)
     print(f"Generated: {path}")
 
 if __name__ == "__main__":
