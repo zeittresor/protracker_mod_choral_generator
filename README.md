@@ -42,4 +42,4 @@ How ever i would suggest to play the songs using the Protracker / Noisetracker /
 
 btw. i think the best way to just play the generated songs is to use the VLC (VideoLan) Mediaplayer because the generated Piano Sample is generated as a Chiptune like FM Synthesized Sample, most Trackers are interpreting it a bit strange, i use the Trackers for myself only to change the instrument but for pure playback VLC ist doing something a bit different and it sounds better with the original sample (also for a converting the generated mods to mp3).
 
-Known bugs: It happens sometimes that most of the created songs have a strange molody (in gui mode) in that case just close the app and restart it (the reason is that the script have preselected "unbeauty" base-notes for the song generation - in that case the result is opposit to the default with strange sounds).
+Known bugs: It happens sometimes that most of the created songs have a strange melody (in gui mode) in that case just close the app and restart it (the reason is that the script have preselected "unbeauty" base-notes for the song generation - in that case the result is opposit to the default with strange sounds).
