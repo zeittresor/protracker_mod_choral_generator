@@ -33,3 +33,6 @@ Added (optional) GUI for order editing and generation options (the GUI is disabl
 The reason for some strange melodic songs is that i dont want the script to get uncreative at all, some uncommon notes are great in a specific context (just delete the worse songs).
 
 How ever i would suggest to play the songs using the Protracker / Noisetracker / StarTrekker (by FLT) on a Amiga Computer or the Protracker 2 Clone / VLC using the Amiga Mod Player extension for Windows 10/11.
+
+btw. i think the best way to just play the generated songs is to use the VLC (VideoLan) Mediaplayer because the generated Piano Sample is generated as a Chiptune like FM Synthesized Sample, most Trackers are interpreting it a bit strange, i use the Trackers for myself only to change the instrument but for pure playback VLC ist doing something a bit different and it sounds better with the original sample (also for a converting the generated mods to mp3).
+
