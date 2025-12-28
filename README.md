@@ -12,6 +12,12 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
+New in Commit d424a19 (latest):
+
+
+- Generates more random songnames
+  
+
 New in Commit 5f9ec5e:
 
 Added (optional) GUI for order editing and generation options (the GUI is disabled by default).
