@@ -12,13 +12,13 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
-New in Commit d424a19 (latest):
+<i><b>New in Commit d424a19 (latest):</b></i>
 
 
 - Generates more random songnames
   
 
-New in Commit 5f9ec5e:
+<i><b>New in Commit 5f9ec5e:</b></i>
 
 Added (optional) GUI for order editing and generation options (the GUI is disabled by default).
 
