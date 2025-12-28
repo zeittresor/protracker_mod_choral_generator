@@ -21,8 +21,12 @@ Added (optional) GUI for order editing and generation options (the GUI is disabl
 <img width="349" height="199" alt="gui" src="https://github.com/user-attachments/assets/0117f50c-6f81-4a2e-95f1-ace326616dfc" />
 
  Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
-<br><br>
 
+ Note: I have extended the default Pattern order a bit but you can change this back in GUI Mode to the previous order if you like.
+ 
+ It was before "0, 1, 2, 3, 2, 4, 5" and now it is "0, 1, 2, 3, 2, 4, 1, 4, 2, 5" (makes each song a bit longer).
+ 
+<br><br>
 
 <b>Some Notes: </b>
 
