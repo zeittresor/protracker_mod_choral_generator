@@ -10,6 +10,15 @@ Just start it. After a moment you can find a new song (each run different melody
 Btw. not every song is great but most of them. ;-)
 
 
+Changelog:
+
+New in Commit 5f9ec5e:
+
+Added GUI for order editing and generation options.
+
+ Use "-gui" commandline parameter to use a GUI
+
+ Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
 
 
 
