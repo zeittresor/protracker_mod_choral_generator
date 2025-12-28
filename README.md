@@ -14,9 +14,11 @@ Btw. not every song is great but most of them. ;-)
 
 New in Commit 5f9ec5e:
 
-Added GUI for order editing and generation options.
+Added (optional) GUI for order editing and generation options (disabled by default).
 
  Use "-gui" commandline parameter to use a GUI
+ 
+<img width="349" height="199" alt="gui" src="https://github.com/user-attachments/assets/0117f50c-6f81-4a2e-95f1-ace326616dfc" />
 
  Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
 <br><br>
