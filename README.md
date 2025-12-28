@@ -14,7 +14,7 @@ Btw. not every song is great but most of them. ;-)
 
 New in Commit 5f9ec5e:
 
-Added (optional) GUI for order editing and generation options (disabled by default).
+Added (optional) GUI for order editing and generation options (the GUI is disabled by default).
 
  Use "-gui" commandline parameter to use a GUI
  
