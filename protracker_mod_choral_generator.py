@@ -304,8 +304,11 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
     song_len = len(order)
     order_table = bytes(order + [0] * (128 - len(order)))
 
-    adjectives = ["Andacht", "Choral", "Vesper", "Cantus", "Abendlied", "Sanctus", "Pax", "Segen"]
-    title_txt = f"{rng.choice(adjectives)} {rng.randint(1, 9999):04d}"
+    section1 = ["The", "A", "A_dirty", "a_holy", "Another", "The_wildest", "A_crazy", "A_funny"]
+    section2 = ["banana", "DJ", "pianist", "stardestroyer", "dentist", "pope", "dictator", "dancingqueen", "jungleman", "toilet", "strawberry"]
+    section3 = ["is_at", "move_to", "will_meet", "save_the", "want_see", "went_to", "dance_fame", "just_get", "have_meet", "move_on", "make_on_to", "get_on", "linked_by"]
+    section4 = ["a_dancefloor__", "the_DJ__", "at_poolparty__", "a_busstation__", "in_heaven__", "ready_to_rock__", "disco__", "crazy__", "party__", "roll_around__", "fight__", "a_sausage__", "a_phonecall__"]
+    title_txt = f"{rng.choice(section1)}_{rng.choice(section2)}_{rng.choice(section3)}_{rng.choice(section4)}_{rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
 
     insts = [inst_header("Piano-ish", sample, volume=48)]
