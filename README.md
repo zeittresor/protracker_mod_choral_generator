@@ -8,9 +8,9 @@ https://github.com/user-attachments/assets/2c7fbb9c-8603-4fca-8788-cfaf6b71d2b0
 Just start it. After a moment you can find a new song (each run different melody) in the output folder (where the script is).
 
 Btw. not every song is great but most of them. ;-)
+<br><br>
 
-
-Changelog:
+<b>Changelog:</b>
 
 New in Commit 5f9ec5e:
 
@@ -19,10 +19,10 @@ Added GUI for order editing and generation options.
  Use "-gui" commandline parameter to use a GUI
 
  Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
+<br><br>
 
 
-
-Some Notes: 
+<b>Some Notes: </b>
 
 The reason for some strange melodic songs is that i dont want the script to get uncreative at all, some uncommon notes are great in a specific context (just delete the worth songs);
 
