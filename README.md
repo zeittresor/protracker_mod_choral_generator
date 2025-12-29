@@ -24,7 +24,7 @@ Added (optional) GUI for order editing and generation options (the GUI is disabl
 
  Use "-gui" commandline parameter to use a GUI
  
-<img width="349" height="199" alt="gui" src="https://github.com/user-attachments/assets/0117f50c-6f81-4a2e-95f1-ace326616dfc" />
+<img width="461" height="265" alt="grafik" src="https://github.com/user-attachments/assets/07a3e5ca-1996-4507-aa57-1c1acf22af59" />
 
  Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
 
