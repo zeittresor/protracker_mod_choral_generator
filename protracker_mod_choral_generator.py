@@ -30,6 +30,19 @@ DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
 
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
+
+INSTRUMENT_CHOICES = [
+    "Piano",
+    "Clarinet",
+    "Sax",
+    "Synth Pad",
+    "Violin",
+    "Tuba",
+    "Banjo",
+    "Panflute",
+]
+
+DEFAULT_INSTRUMENTS = ["Piano", "Piano", "Piano", "Piano"]
 def note_shift(note: str, semitones: int) -> str:
     i = CHROMATIC.index(note)
     j = i + semitones
@@ -93,6 +106,128 @@ def make_pianoish_sample(rng: random.Random, length=32768, sr=8287) -> bytes:
     if len(data) % 2 == 1:
         data.append(0)
     return bytes(data)
+
+def _one_pole_lowpass(x: float, state: float, alpha: float) -> float:
+    return state + alpha * (x - state)
+
+def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287) -> bytes:
+    kind = kind.strip()
+    if kind not in INSTRUMENT_CHOICES:
+        kind = "Piano"
+
+    if kind == "Piano":
+        return make_pianoish_sample(rng, length=length, sr=sr)
+
+    f0 = rng.choice([220.0, 246.94, 261.63, 293.66])
+    detune = rng.uniform(0.9985, 1.0045)
+    vib_rate = rng.uniform(4.5, 6.2)
+    vib_amt = rng.uniform(0.0, 0.0045) if kind in ("Violin", "Synth Pad") else rng.uniform(0.0, 0.0025)
+
+    if kind in ("Synth Pad", "Violin", "Panflute", "Clarinet", "Sax"):
+        attack = int(sr * rng.uniform(0.010, 0.030))
+        decay = rng.uniform(0.25, 0.55)
+    elif kind == "Tuba":
+        attack = int(sr * rng.uniform(0.015, 0.040))
+        decay = rng.uniform(0.35, 0.70)
+    else:  # Banjo
+        attack = int(sr * rng.uniform(0.002, 0.006))
+        decay = rng.uniform(1.6, 2.8)
+
+    noise_amt = 0.0
+    drive = 1.1
+    lp_alpha = 1.0
+    partials: list[tuple[int, float]] = [(1, 1.0)]
+
+    if kind == "Clarinet":
+        partials = [(1, 1.0), (3, 0.55), (5, 0.35), (7, 0.22), (2, 0.08)]
+        noise_amt = 0.020
+        drive = 1.35
+        lp_alpha = 0.22
+    elif kind == "Sax":
+        partials = [(1, 1.0), (2, 0.42), (3, 0.36), (4, 0.22), (5, 0.18), (6, 0.12)]
+        noise_amt = 0.028
+        drive = 1.55
+        lp_alpha = 0.20
+    elif kind == "Synth Pad":
+        partials = [(1, 1.0), (2, 0.24), (3, 0.18), (4, 0.12)]
+        noise_amt = 0.010
+        drive = 1.10
+        lp_alpha = 0.28
+    elif kind == "Violin":
+        partials = [(1, 1.0), (2, 0.60), (3, 0.45), (4, 0.30), (5, 0.22), (6, 0.16), (7, 0.12)]
+        noise_amt = 0.012
+        drive = 1.25
+        lp_alpha = 0.18
+    elif kind == "Tuba":
+        partials = [(1, 1.0), (2, 0.40), (3, 0.25), (4, 0.12)]
+        noise_amt = 0.006
+        drive = 1.15
+        lp_alpha = 0.12
+    elif kind == "Banjo":
+        partials = [(1, 1.0), (2, 0.52), (3, 0.42), (4, 0.32), (5, 0.24), (6, 0.18), (7, 0.12), (8, 0.10)]
+        noise_amt = 0.018
+        drive = 1.45
+        lp_alpha = 0.32
+    elif kind == "Panflute":
+        partials = [(1, 1.0), (2, 0.18), (3, 0.08)]
+        noise_amt = 0.030
+        drive = 1.10
+        lp_alpha = 0.16
+
+    # Generate floats first (simple normalization so instruments sit similarly in the mix)
+    buf = [0.0] * length
+    lp_state = 0.0
+    for n in range(length):
+        t = n / sr
+        # subtle vibrato for some instruments
+        f = f0 * (1.0 + vib_amt * math.sin(2 * math.pi * vib_rate * t))
+
+        x = 0.0
+        for k, a in partials:
+            x += a * math.sin(2 * math.pi * (f * k) * t)
+
+        # detuned layer for softness/chorus
+        if kind in ("Synth Pad", "Violin", "Sax"):
+            x += 0.18 * math.sin(2 * math.pi * (f * detune) * t)
+
+        if noise_amt > 0.0:
+            x += (rng.uniform(-1.0, 1.0) * noise_amt)
+
+        # transient / pick noise for banjo
+        if kind == "Banjo" and t < 0.020:
+            x += math.sin(2 * math.pi * 3100 * t) * (0.10 * (1.0 - (t / 0.020)))
+
+        # soften harshness
+        if lp_alpha < 1.0:
+            lp_state = _one_pole_lowpass(x, lp_state, lp_alpha)
+            x = lp_state
+
+        env = math.exp(-decay * t)
+        if n < attack:
+            env *= (n / max(1, attack))
+
+        y = math.tanh(drive * x) * env
+        buf[n] = y
+
+    mx = max(1e-6, max(abs(v) for v in buf))
+    scale = 120.0 / mx
+    data = bytearray()
+    for v in buf:
+        s = int(max(-127, min(127, round(v * scale))))
+        data.append(s & 0xFF)
+
+    if len(data) % 2 == 1:
+        data.append(0)
+    return bytes(data)
+
+def normalize_instrument_list(insts: list[str] | None) -> list[str]:
+    if not insts or len(insts) != 4:
+        return DEFAULT_INSTRUMENTS[:]
+    out = []
+    for x in insts[:4]:
+        x = (x or "").strip()
+        out.append(x if x in INSTRUMENT_CHOICES else "Piano")
+    return out
 
 def major_scale(root_note: str) -> list[str]:
     intervals = [0, 2, 4, 5, 7, 9, 11]
@@ -171,8 +306,12 @@ def make_patterns(rng: random.Random, enable_slowdown: bool = True, speed: int =
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
         patterns.append(pat)
 
-    def set_cell(p, row, ch, note=None, sample=1, effect=0x00, param=0x00):
-        patterns[p][row][ch] = (note, sample if note is not None else 0, effect, param)
+    def set_cell(p, row, ch, note=None, sample=None, effect=0x00, param=0x00):
+        if note is None:
+            samp = 0 if sample is None else sample
+        else:
+            samp = (ch + 1) if sample is None else sample
+        patterns[p][row][ch] = (note, samp, effect, param)
 
     set_cell(0, 0, 0, None, 0, 0x0F, speed)
     set_cell(0, 0, 1, None, 0, 0x0F, tempo)
@@ -288,7 +427,15 @@ def validate_order(order: list[int], n_patterns: int = 6) -> None:
     if bad:
         raise ValueError(f"Order contains out-of-range pattern numbers {bad}. Allowed: 0..{n_patterns-1}")
 
-def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list[int] | None = None, enable_slowdown: bool = True, speed: int = DEFAULT_SPEED, tempo: int = DEFAULT_TEMPO) -> Path:
+def generate_mod(
+    out_dir: str = "mods_out",
+    seed: int | None = None,
+    order: list[int] | None = None,
+    enable_slowdown: bool = True,
+    speed: int = DEFAULT_SPEED,
+    tempo: int = DEFAULT_TEMPO,
+    instruments: list[str] | None = None,
+) -> Path:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
@@ -296,7 +443,14 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
         seed = int(time.time() * 1000) ^ (os.getpid() << 8)
     rng = random.Random(seed)
 
-    sample = make_pianoish_sample(rng)
+    inst_kinds = normalize_instrument_list(instruments)
+
+    sample_cache: dict[str, bytes] = {}
+    samples: list[bytes] = []
+    for kind in inst_kinds:
+        if kind not in sample_cache:
+            sample_cache[kind] = make_instrument_sample(kind, rng)
+        samples.append(sample_cache[kind])
     patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown, speed=speed, tempo=tempo)
     pat_data = patterns_to_bytes(patterns)
 
@@ -314,9 +468,12 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
     title_txt = f"{rng.choice(section1)}_{rng.choice(section2)}_{rng.choice(section3)}_{rng.choice(section4)}_{rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
 
-    insts = [inst_header("Piano-ish", sample, volume=48)]
+    insts = [inst_header(inst_kinds[0], samples[0], volume=48)]
+    insts.append(inst_header(inst_kinds[1], samples[1], volume=48))
+    insts.append(inst_header(inst_kinds[2], samples[2], volume=48))
+    insts.append(inst_header(inst_kinds[3], samples[3], volume=48))
     empty = b"\x00" * 22 + struct.pack(">H", 0) + bytes([0]) + bytes([0]) + struct.pack(">H", 0) + struct.pack(">H", 1)
-    insts += [empty] * 30
+    insts += [empty] * 27
 
     mod = bytearray()
     mod += title
@@ -327,7 +484,8 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
     mod += order_table
     mod += b"M.K."
     mod += pat_data
-    mod += sample
+    for s in samples:
+        mod += s
 
     ts = time.strftime("%Y%m%d_%H%M%S")
     fname = f"{title_txt.replace(' ', '_')}_{ts}_key_{key_root.replace('-', '').replace('#','s')}.mod"
@@ -338,6 +496,7 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
 def run_gui():
     import tkinter as tk
     from tkinter import messagebox
+    from tkinter import ttk
 
     root = tk.Tk()
     root.title("ProTracker MOD Choral Generator")
@@ -365,9 +524,24 @@ def run_gui():
     slowdown_cb = tk.Checkbutton(frm, text="Enable slowdown in pattern 5 (ending)", variable=slowdown_var)
     slowdown_cb.grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
+    tk.Label(frm, text="Instrument per channel (sample 1..4):").grid(row=5, column=0, columnspan=2, sticky="w")
+
+    inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
+
+    def add_inst_row(r: int, label: str, var: tk.StringVar):
+        tk.Label(frm, text=label).grid(row=r, column=0, sticky="w", pady=(2, 2))
+        cb = ttk.Combobox(frm, textvariable=var, values=INSTRUMENT_CHOICES, state="readonly", width=18)
+        cb.grid(row=r, column=1, sticky="e", pady=(2, 2))
+        return cb
+
+    add_inst_row(6, "Channel 1:", inst_vars[0])
+    add_inst_row(7, "Channel 2:", inst_vars[1])
+    add_inst_row(8, "Channel 3:", inst_vars[2])
+    add_inst_row(9, "Channel 4:", inst_vars[3])
+
     out_label_var = tk.StringVar(value="")
     out_label = tk.Label(frm, textvariable=out_label_var, anchor="w", justify="left")
-    out_label.grid(row=6, column=0, columnspan=2, sticky="we", pady=(8, 0))
+    out_label.grid(row=11, column=0, columnspan=2, sticky="we", pady=(8, 0))
 
     def on_generate():
         try:
@@ -379,16 +553,17 @@ def run_gui():
                 raise ValueError("Speed must be in range 1..31 (ticks per row).")
             if tempo < 32 or tempo > 255:
                 raise ValueError("Tempo must be in range 32..255 (BPM).")
-            p = generate_mod(order=order, enable_slowdown=slowdown_var.get(), speed=speed, tempo=tempo)
+            instruments = [v.get() for v in inst_vars]
+            p = generate_mod(order=order, enable_slowdown=slowdown_var.get(), speed=speed, tempo=tempo, instruments=instruments)
             out_label_var.set(f"Generated:\n{p}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     gen_btn = tk.Button(frm, text="Generate", command=on_generate, width=18)
-    gen_btn.grid(row=5, column=0, sticky="w")
+    gen_btn.grid(row=10, column=0, sticky="w")
 
     quit_btn = tk.Button(frm, text="Quit", command=root.destroy, width=18)
-    quit_btn.grid(row=5, column=1, sticky="e")
+    quit_btn.grid(row=10, column=1, sticky="e")
 
     frm.columnconfigure(0, weight=1)
     frm.columnconfigure(1, weight=1)
@@ -400,6 +575,10 @@ def main():
     ap.add_argument("-nogui", action="store_true", help="Run in CLI mode (do not show GUI).")
     ap.add_argument("-speed", type=int, default=None, help="CLI: MOD speed (ticks/row, 1..31).")
     ap.add_argument("-tempo", type=int, default=None, help="CLI: MOD tempo (BPM, 32..255).")
+    ap.add_argument("-inst1", type=str, default=None, help=f"CLI: instrument for channel 1. One of: {', '.join(INSTRUMENT_CHOICES)}")
+    ap.add_argument("-inst2", type=str, default=None, help=f"CLI: instrument for channel 2. One of: {', '.join(INSTRUMENT_CHOICES)}")
+    ap.add_argument("-inst3", type=str, default=None, help=f"CLI: instrument for channel 3. One of: {', '.join(INSTRUMENT_CHOICES)}")
+    ap.add_argument("-inst4", type=str, default=None, help=f"CLI: instrument for channel 4. One of: {', '.join(INSTRUMENT_CHOICES)}")
     ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown (pattern 5 tempo change) in CLI mode.")
     args = ap.parse_args()
 
@@ -413,7 +592,12 @@ def main():
         raise SystemExit("Error: -speed must be in range 1..31.")
     if tempo < 32 or tempo > 255:
         raise SystemExit("Error: -tempo must be in range 32..255.")
-    path = generate_mod(enable_slowdown=not args.noslowdown, speed=speed, tempo=tempo)
+    insts = [args.inst1, args.inst2, args.inst3, args.inst4]
+    if any(x is not None for x in insts):
+        instruments = [x if x is not None else DEFAULT_INSTRUMENTS[i] for i, x in enumerate(insts)]
+    else:
+        instruments = None
+    path = generate_mod(enable_slowdown=not args.noslowdown, speed=speed, tempo=tempo, instruments=instruments)
     print(f"Generated: {path}")
 
 if __name__ == "__main__":
