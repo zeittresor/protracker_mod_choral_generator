@@ -16,9 +16,11 @@ Btw. not every song is great but most of them. ;-)
 
 
 - Changed the Samples of each of the 4 Protracker channels to different Samples (even if you stay by Piano it will be a different Sample Number to make it easier to change it later).
-- Added some different (generated) default instuments (selectable) for each Channel
+- Added some different (generated) default instuments (selectable) for each Channel (Piano, Clarinet, Sax, Synth Pad, Violin, Tuba, Bajo, Panflute)
 
 <img width="533" height="392" alt="sax" src="https://github.com/user-attachments/assets/a4a271db-2c13-4668-a5a0-34df8468c821" />
+
+Some Fun: If you did like the classic Game "Shadow of the Beast" (by Psygnosis) try to play around with the pattern order and the channel instruments and set the first and second channel to bajo, the third to panflute and the 4th channel again to banjo, might be be thats the result get a little bit similar.. x-)
 
 
 <i><b>New in Commit c6b427a (28.12.2025):</b></i>
