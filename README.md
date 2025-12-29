@@ -12,8 +12,16 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
+<i><b>New in Commit 00cc274 (latest / 29.12.2025):</b></i>
 
-<i><b>New in Commit c6b427a (latest / 28.12.2025):</b></i>
+
+- Changed the Samples of each of the 4 Protracker channels to different Samples (even if you stay by Piano it will be a different Sample Number to make it easier to change it later).
+- Added some different (generated) default instuments (selectable) for each Channel
+
+<img width="533" height="392" alt="sax" src="https://github.com/user-attachments/assets/a4a271db-2c13-4668-a5a0-34df8468c821" />
+
+
+<i><b>New in Commit c6b427a (28.12.2025):</b></i>
 
 
 - Changed default mode from CLI mode to GUI mode
