@@ -27,6 +27,9 @@ CHROMATIC_SET = set(CHROMATIC)
 
 DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
 
+
+DEFAULT_SPEED = 6
+DEFAULT_TEMPO = 125
 def note_shift(note: str, semitones: int) -> str:
     i = CHROMATIC.index(note)
     j = i + semitones
@@ -156,7 +159,7 @@ def build_bar_melody(rng: random.Random, scale: list[str], chord: tuple[str, str
         events[0] = (rng.choice(chord_tones), events[0][1])
     return events
 
-def make_patterns(rng: random.Random, enable_slowdown: bool = True):
+def make_patterns(rng: random.Random, enable_slowdown: bool = True, speed: int = DEFAULT_SPEED, tempo: int = DEFAULT_TEMPO):
     NUM_CH = 4
     ROWS = 64
     patterns = []
@@ -171,8 +174,8 @@ def make_patterns(rng: random.Random, enable_slowdown: bool = True):
     def set_cell(p, row, ch, note=None, sample=1, effect=0x00, param=0x00):
         patterns[p][row][ch] = (note, sample if note is not None else 0, effect, param)
 
-    set_cell(0, 0, 0, None, 0, 0x0F, 0x06)
-    set_cell(0, 0, 1, None, 0, 0x0F, 0x7D)
+    set_cell(0, 0, 0, None, 0, 0x0F, speed)
+    set_cell(0, 0, 1, None, 0, 0x0F, tempo)
 
     progs = [
         pick_progression(rng),
@@ -285,7 +288,7 @@ def validate_order(order: list[int], n_patterns: int = 6) -> None:
     if bad:
         raise ValueError(f"Order contains out-of-range pattern numbers {bad}. Allowed: 0..{n_patterns-1}")
 
-def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list[int] | None = None, enable_slowdown: bool = True) -> Path:
+def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list[int] | None = None, enable_slowdown: bool = True, speed: int = DEFAULT_SPEED, tempo: int = DEFAULT_TEMPO) -> Path:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
@@ -294,7 +297,7 @@ def generate_mod(out_dir: str = "mods_out", seed: int | None = None, order: list
     rng = random.Random(seed)
 
     sample = make_pianoish_sample(rng)
-    patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown)
+    patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown, speed=speed, tempo=tempo)
     pat_data = patterns_to_bytes(patterns)
 
     if order is None:
@@ -348,28 +351,44 @@ def run_gui():
     order_entry = tk.Entry(frm, textvariable=order_var, width=44)
     order_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(2, 8))
 
+    tk.Label(frm, text="Speed (ticks/row, 1-31):").grid(row=2, column=0, sticky="w")
+    speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
+    speed_entry = tk.Entry(frm, textvariable=speed_var, width=10)
+    speed_entry.grid(row=2, column=1, sticky="e", pady=(0, 6))
+
+    tk.Label(frm, text="Tempo (BPM, 32-255):").grid(row=3, column=0, sticky="w")
+    tempo_var = tk.StringVar(value=str(DEFAULT_TEMPO))
+    tempo_entry = tk.Entry(frm, textvariable=tempo_var, width=10)
+    tempo_entry.grid(row=3, column=1, sticky="e", pady=(0, 10))
+
     slowdown_var = tk.BooleanVar(value=True)
     slowdown_cb = tk.Checkbutton(frm, text="Enable slowdown in pattern 5 (ending)", variable=slowdown_var)
-    slowdown_cb.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 10))
+    slowdown_cb.grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
     out_label_var = tk.StringVar(value="")
     out_label = tk.Label(frm, textvariable=out_label_var, anchor="w", justify="left")
-    out_label.grid(row=4, column=0, columnspan=2, sticky="we", pady=(8, 0))
+    out_label.grid(row=6, column=0, columnspan=2, sticky="we", pady=(8, 0))
 
     def on_generate():
         try:
             order = parse_order_string(order_var.get())
             validate_order(order, n_patterns=6)
-            p = generate_mod(order=order, enable_slowdown=slowdown_var.get())
+            speed = int(speed_var.get().strip())
+            tempo = int(tempo_var.get().strip())
+            if speed < 1 or speed > 31:
+                raise ValueError("Speed must be in range 1..31 (ticks per row).")
+            if tempo < 32 or tempo > 255:
+                raise ValueError("Tempo must be in range 32..255 (BPM).")
+            p = generate_mod(order=order, enable_slowdown=slowdown_var.get(), speed=speed, tempo=tempo)
             out_label_var.set(f"Generated:\n{p}")
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
     gen_btn = tk.Button(frm, text="Generate", command=on_generate, width=18)
-    gen_btn.grid(row=3, column=0, sticky="w")
+    gen_btn.grid(row=5, column=0, sticky="w")
 
     quit_btn = tk.Button(frm, text="Quit", command=root.destroy, width=18)
-    quit_btn.grid(row=3, column=1, sticky="e")
+    quit_btn.grid(row=5, column=1, sticky="e")
 
     frm.columnconfigure(0, weight=1)
     frm.columnconfigure(1, weight=1)
@@ -377,16 +396,24 @@ def run_gui():
     root.mainloop()
 
 def main():
-    ap = argparse.ArgumentParser(description="Generate churchy ProTracker .MOD files.")
-    ap.add_argument("-gui", action="store_true", help="Show GUI (order editor + generate button).")
+    ap = argparse.ArgumentParser(description="Generate churchy ProTracker .MOD files (GUI by default).")
+    ap.add_argument("-nogui", action="store_true", help="Run in CLI mode (do not show GUI).")
+    ap.add_argument("-speed", type=int, default=None, help="CLI: MOD speed (ticks/row, 1..31).")
+    ap.add_argument("-tempo", type=int, default=None, help="CLI: MOD tempo (BPM, 32..255).")
     ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown (pattern 5 tempo change) in CLI mode.")
     args = ap.parse_args()
 
-    if args.gui:
+    if not args.nogui:
         run_gui()
         return
 
-    path = generate_mod(enable_slowdown=not args.noslowdown)
+    speed = DEFAULT_SPEED if args.speed is None else args.speed
+    tempo = DEFAULT_TEMPO if args.tempo is None else args.tempo
+    if speed < 1 or speed > 31:
+        raise SystemExit("Error: -speed must be in range 1..31.")
+    if tempo < 32 or tempo > 255:
+        raise SystemExit("Error: -tempo must be in range 32..255.")
+    path = generate_mod(enable_slowdown=not args.noslowdown, speed=speed, tempo=tempo)
     print(f"Generated: {path}")
 
 if __name__ == "__main__":
