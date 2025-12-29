@@ -12,7 +12,18 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
-<i><b>New in Commit d424a19 (latest):</b></i>
+
+<i><b>New in Commit c6b427a (latest / 28.12.2025):</b></i>
+
+
+- Changed default mode from CLI mode to GUI mode
+- Changed the Commandlineoption -gui to -nogui to use the console only instead of the GUI
+- Added Options in the GUI to change the BPM / Speed of the generated songs
+- Added more CLI parameters to alter the bpm / speed using the console
+- Some Tests done with different song/pattern orders like 5, 5, 1, 5, 0, 2, 3, 4, 2, 5, 0
+
+
+<i><b>New in Commit d424a19:</b></i>
 
 
 - Generates more random songnames
