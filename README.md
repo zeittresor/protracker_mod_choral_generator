@@ -22,6 +22,7 @@ Btw. not every song is great but most of them. ;-)
 - Added more CLI parameters to alter the bpm / speed using the console
 - Some Tests done with different song/pattern orders like 5, 5, 1, 5, 0, 2, 3, 4, 2, 5, 0
 
+<img width="461" height="265" alt="grafik" src="https://github.com/user-attachments/assets/07a3e5ca-1996-4507-aa57-1c1acf22af59" />
 
 <i><b>New in Commit d424a19:</b></i>
 
@@ -35,8 +36,6 @@ Added (optional) GUI for order editing and generation options (the GUI is disabl
 
  Use "-gui" commandline parameter to use a GUI
  
-<img width="461" height="265" alt="grafik" src="https://github.com/user-attachments/assets/07a3e5ca-1996-4507-aa57-1c1acf22af59" />
-
  Use "-noslowdown" commandline parameter to disable the slowdown to the song ending.
 
  Note: I have extended the default Pattern order a bit but you can change this back in GUI Mode to the previous order if you like.
