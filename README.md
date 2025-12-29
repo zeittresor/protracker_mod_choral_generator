@@ -24,6 +24,10 @@ Btw. not every song is great but most of them. ;-)
 
 <img width="461" height="265" alt="grafik" src="https://github.com/user-attachments/assets/07a3e5ca-1996-4507-aa57-1c1acf22af59" />
 
+
+https://github.com/user-attachments/assets/d87156f5-4f35-45bd-b5b7-c26b0f24e083
+
+
 <i><b>New in Commit d424a19:</b></i>
 
 
