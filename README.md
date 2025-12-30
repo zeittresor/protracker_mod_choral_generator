@@ -12,7 +12,19 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
-<i><b>New in Commit 78653e3 (latest / 30.12.2025 v1.2):</b></i>
+<i><b>New in Commit dd96d8b (latest / 30.12.2025 v1.3):</b></i>
+
+
+- Added the option to select presets (all of the so far testet pattern orders)
+- Changed the slowdown effect to the last pattern (if enabled) instead of explicit pattern 5
+
+<img width="477" height="392" alt="v1_3" src="https://github.com/user-attachments/assets/8278d9e9-cf6d-471d-ba08-e7d2d785d3b2" />
+
+
+https://github.com/user-attachments/assets/7e936bdb-bee0-4873-adc5-1dc91365918b
+
+
+<i><b>New in Commit 78653e3 (30.12.2025 v1.2):</b></i>
 
 
 - Added some more instruments to choose (Acoustic Guitar, Flamenco Guitar, Organ, Flute, Oboe)
