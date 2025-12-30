@@ -28,6 +28,13 @@ CHROMATIC_SET = set(CHROMATIC)
 DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
 
 
+
+ORDER_PRESETS = [
+    "5, 5, 1, 5, 0, 2, 3, 4, 2, 5, 0",
+    "5, 0, 1, 5, 2, 3, 1, 4, 2, 5, 0",
+    "0, 1, 2, 3, 2, 4, 1, 4, 2, 5",
+    "0, 1, 2, 3, 2, 4, 5",
+]
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
@@ -340,7 +347,7 @@ def build_bar_melody(rng: random.Random, scale: list[str], chord: tuple[str, str
         events[0] = (rng.choice(chord_tones), events[0][1])
     return events
 
-def make_patterns(rng: random.Random, enable_slowdown: bool = True, speed: int = DEFAULT_SPEED, tempo: int = DEFAULT_TEMPO):
+def make_patterns(rng: random.Random, speed: int = DEFAULT_SPEED, tempo: int = DEFAULT_TEMPO):
     NUM_CH = 4
     ROWS = 64
     patterns = []
@@ -438,11 +445,23 @@ def make_patterns(rng: random.Random, enable_slowdown: bool = True, speed: int =
                 tones = [t if t in CHROMATIC_SET else note_shift(key_root, 12) for t in tones]
                 for i in range(0, 16, 2):
                     set_cell(p_idx, r0 + i, 3, tones[(i // 2) % len(tones)])
-
-    if enable_slowdown:
-        set_cell(5, 0, 0, None, 0, 0x0F, rng.choice([0x64, 0x5A, 0x50]))
-
     return patterns, key_root
+
+
+def apply_end_slowdown_to_pattern(pattern, rng: random.Random):
+    # Insert an Fxx tempo change somewhere early in the ending pattern.
+    # We keep the existing note/sample and only add the effect so the music stays intact.
+    slow_tempo = rng.choice([0x64, 0x5A, 0x50])  # 100 / 90 / 80 BPM
+    for row in range(64):
+        for ch in range(4):
+            note, samp, eff, param = pattern[row][ch]
+            if eff == 0x00 and param == 0x00:
+                pattern[row][ch] = (note, samp, 0x0F, slow_tempo)
+                return
+    # Fallback: overwrite the very last cell's effect (rare)
+    note, samp, eff, param = pattern[63][3]
+    pattern[63][3] = (note, samp, 0x0F, slow_tempo)
+
 
 def patterns_to_bytes(patterns):
     blob = bytearray()
@@ -497,15 +516,24 @@ def generate_mod(
         if kind not in sample_cache:
             sample_cache[kind] = make_instrument_sample(kind, rng, f0=REF_F0)
         samples.append(sample_cache[kind])
-    patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown, speed=speed, tempo=tempo)
-    pat_data = patterns_to_bytes(patterns)
+    patterns, key_root = make_patterns(rng, speed=speed, tempo=tempo)
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
     validate_order(order, n_patterns=len(patterns))
 
-    song_len = len(order)
-    order_table = bytes(order + [0] * (128 - len(order)))
+    order_for_write = list(order)
+    if enable_slowdown and len(order_for_write) > 0:
+        # Apply slowdown only to the final order step by cloning the last pattern.
+        src_pat = order_for_write[-1]
+        ending_pat = [list(row) for row in patterns[src_pat]]
+        apply_end_slowdown_to_pattern(ending_pat, rng)
+        patterns.append(ending_pat)
+        order_for_write[-1] = len(patterns) - 1
+
+    pat_data = patterns_to_bytes(patterns)
+    song_len = len(order_for_write)
+    order_table = bytes(order_for_write + [0] * (128 - len(order_for_write)))
 
     section1 = ["The", "A", "A_dirty", "a_holy", "Another", "The_wildest", "A_crazy", "A_funny"]
     section2 = ["banana", "DJ", "pianist", "stardestroyer", "dentist", "pope", "dictator", "dancingqueen", "jungleman", "toilet", "strawberry"]
@@ -545,7 +573,7 @@ def run_gui():
     from tkinter import ttk
 
     root = tk.Tk()
-    root.title("ProTracker MOD Choral Generator (v1.2)")
+    root.title("ProTracker MOD Choral Generator (v1.3)")
 
     frm = tk.Frame(root, padx=10, pady=10)
     frm.pack(fill="both", expand=True)
@@ -553,9 +581,8 @@ def run_gui():
     tk.Label(frm, text="Pattern order (comma-separated):").grid(row=0, column=0, sticky="w")
 
     order_var = tk.StringVar(value=DEFAULT_ORDER_STR)
-    order_entry = tk.Entry(frm, textvariable=order_var, width=44)
-    order_entry.grid(row=1, column=0, columnspan=2, sticky="we", pady=(2, 8))
-
+    order_combo = ttk.Combobox(frm, textvariable=order_var, values=ORDER_PRESETS, width=44, state="normal")
+    order_combo.grid(row=1, column=0, columnspan=2, sticky="we", pady=(2, 8))
     tk.Label(frm, text="Speed (ticks/row, 1-31):").grid(row=2, column=0, sticky="w")
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
     speed_entry = tk.Entry(frm, textvariable=speed_var, width=10)
@@ -567,7 +594,7 @@ def run_gui():
     tempo_entry.grid(row=3, column=1, sticky="e", pady=(0, 10))
 
     slowdown_var = tk.BooleanVar(value=True)
-    slowdown_cb = tk.Checkbutton(frm, text="Enable slowdown in pattern 5 (ending)", variable=slowdown_var)
+    slowdown_cb = tk.Checkbutton(frm, text="Enable slowdown to the end of the song", variable=slowdown_var)
     slowdown_cb.grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 10))
 
     tk.Label(frm, text="Instrument per channel (sample 1..4):").grid(row=5, column=0, columnspan=2, sticky="w")
@@ -625,7 +652,7 @@ def main():
     ap.add_argument("-inst2", type=str, default=None, help=f"CLI: instrument for channel 2. One of: {', '.join(INSTRUMENT_CHOICES)}")
     ap.add_argument("-inst3", type=str, default=None, help=f"CLI: instrument for channel 3. One of: {', '.join(INSTRUMENT_CHOICES)}")
     ap.add_argument("-inst4", type=str, default=None, help=f"CLI: instrument for channel 4. One of: {', '.join(INSTRUMENT_CHOICES)}")
-    ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown (pattern 5 tempo change) in CLI mode.")
+    ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown at the end of the song.")
     args = ap.parse_args()
 
     if not args.nogui:
