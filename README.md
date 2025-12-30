@@ -7,7 +7,15 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit dd96d8b (latest / 30.12.2025 v1.3):</b></i>
+<i><b>New in Commit 04fffbd (latest / 31.12.2025 v1.4.1):</b></i>
+
+
+- New interface with build-in spectrum analyser and play function (after rendering the output).
+
+<img width="1128" height="468" alt="v1_4_1" src="https://github.com/user-attachments/assets/789faa16-8d99-4c87-a560-377b3f629d64" />
+
+
+<i><b>New in Commit dd96d8b (30.12.2025 v1.3):</b></i>
 
 
 - Added the option to select presets from the pattern order field as a pulldown menu (all of the so far testet pattern orders)
