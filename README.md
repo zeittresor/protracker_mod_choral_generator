@@ -12,7 +12,14 @@ Btw. not every song is great but most of them. ;-)
 
 <b>Changelog:</b>
 
-<i><b>New in Commit 00cc274 (latest / 29.12.2025):</b></i>
+<i><b>New in Commit 78653e3 (latest / 30.12.2025 v1.2):</b></i>
+
+
+- Added some more instruments to choose (Acoustic Guitar, Flamenco Guitar, Organ, Flute, Oboe)
+- Bugfix for the Instruments (all instruments use now the same reference-note to make them more harmonic to the other instruments)
+
+
+<i><b>New in Commit 00cc274 (29.12.2025 v1.1):</b></i>
 
 
 - Changed the Samples of each of the 4 Protracker channels to different Samples (even if you stay by Piano it will be a different Sample Number to make it easier to change it later).
