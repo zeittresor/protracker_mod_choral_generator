@@ -31,6 +31,9 @@ DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
+# Reference fundamental for all generated samples (Hz). Tuned so that C-3 plays consistently across instruments.
+REF_F0 = 261.63
+
 INSTRUMENT_CHOICES = [
     "Piano",
     "Clarinet",
@@ -40,6 +43,11 @@ INSTRUMENT_CHOICES = [
     "Tuba",
     "Banjo",
     "Panflute",
+    "Acoustic Guitar",
+    "Flamenco Guitar",
+    "Organ",
+    "Flute",
+    "Oboe",
 ]
 
 DEFAULT_INSTRUMENTS = ["Piano", "Piano", "Piano", "Piano"]
@@ -70,16 +78,15 @@ def inst_header(name: str, sample_bytes: bytes, finetune=0, volume=48, loop_star
         struct.pack(">H", loop_len_words & 0xFFFF)
     )
 
-def make_pianoish_sample(rng: random.Random, length=32768, sr=8287) -> bytes:
-    f0 = rng.choice([220.0, 246.94, 261.63, 293.66])
+def make_pianoish_sample(rng: random.Random, length=32768, sr=8287, f0: float = REF_F0) -> bytes:
     attack = int(sr * rng.uniform(0.004, 0.008))
     decay = rng.uniform(0.9, 1.6)
-    detune = rng.uniform(1.002, 1.008)
+    detune = rng.uniform(0.9990, 1.0025)
 
     h2 = rng.uniform(0.35, 0.50)
     h3 = rng.uniform(0.18, 0.28)
     h4 = rng.uniform(0.10, 0.20)
-    d2 = rng.uniform(0.06, 0.14)
+    d2 = rng.uniform(0.04, 0.10)
 
     data = bytearray()
     for n in range(length):
@@ -110,28 +117,38 @@ def make_pianoish_sample(rng: random.Random, length=32768, sr=8287) -> bytes:
 def _one_pole_lowpass(x: float, state: float, alpha: float) -> float:
     return state + alpha * (x - state)
 
-def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287) -> bytes:
+def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0) -> bytes:
     kind = kind.strip()
     if kind not in INSTRUMENT_CHOICES:
         kind = "Piano"
 
     if kind == "Piano":
-        return make_pianoish_sample(rng, length=length, sr=sr)
-
-    f0 = rng.choice([220.0, 246.94, 261.63, 293.66])
-    detune = rng.uniform(0.9985, 1.0045)
+        return make_pianoish_sample(rng, length=length, sr=sr, f0=f0)
+    detune = rng.uniform(0.9990, 1.0015)
     vib_rate = rng.uniform(4.5, 6.2)
-    vib_amt = rng.uniform(0.0, 0.0045) if kind in ("Violin", "Synth Pad") else rng.uniform(0.0, 0.0025)
+    # Keep vibrato subtle so pitch stays consistent in chords
+    vib_amt = rng.uniform(0.0, 0.0030) if kind in ("Violin", "Synth Pad", "Panflute", "Flute") else rng.uniform(0.0, 0.0015)
 
-    if kind in ("Synth Pad", "Violin", "Panflute", "Clarinet", "Sax"):
-        attack = int(sr * rng.uniform(0.010, 0.030))
-        decay = rng.uniform(0.25, 0.55)
+    if kind == "Organ":
+        vib_amt = 0.0
+
+    if kind in ("Synth Pad", "Violin", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ"):
+        attack = int(sr * rng.uniform(0.012, 0.040))
+        decay = rng.uniform(0.18, 0.55)
     elif kind == "Tuba":
-        attack = int(sr * rng.uniform(0.015, 0.040))
-        decay = rng.uniform(0.35, 0.70)
-    else:  # Banjo
-        attack = int(sr * rng.uniform(0.002, 0.006))
-        decay = rng.uniform(1.6, 2.8)
+        attack = int(sr * rng.uniform(0.015, 0.045))
+        decay = rng.uniform(0.35, 0.75)
+    else:  # Plucked (Banjo / Guitars)
+        attack = int(sr * rng.uniform(0.002, 0.007))
+        decay = rng.uniform(1.2, 2.9)
+
+
+    if kind == "Organ":
+        # Very slow decay so held chords sound organ-like
+        decay = rng.uniform(0.02, 0.08)
+
+    if kind == "Flute":
+        decay = rng.uniform(0.14, 0.32)
 
     noise_amt = 0.0
     drive = 1.1
@@ -174,6 +191,32 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         drive = 1.10
         lp_alpha = 0.16
 
+    elif kind == "Acoustic Guitar":
+        partials = [(1, 1.0), (2, 0.70), (3, 0.52), (4, 0.38), (5, 0.30), (6, 0.22), (7, 0.17), (8, 0.13), (9, 0.10)]
+        noise_amt = 0.015
+        drive = 1.38
+        lp_alpha = 0.26
+    elif kind == "Flamenco Guitar":
+        partials = [(1, 1.0), (2, 0.74), (3, 0.56), (4, 0.42), (5, 0.34), (6, 0.26), (7, 0.19), (8, 0.15), (9, 0.11), (10, 0.08)]
+        noise_amt = 0.020
+        drive = 1.50
+        lp_alpha = 0.36
+    elif kind == "Organ":
+        partials = [(1, 1.0), (2, 0.70), (3, 0.40), (4, 0.30), (5, 0.20), (6, 0.12), (8, 0.10)]
+        noise_amt = 0.004
+        drive = 1.08
+        lp_alpha = 0.34
+    elif kind == "Flute":
+        partials = [(1, 1.0), (2, 0.10), (3, 0.03)]
+        noise_amt = 0.020
+        drive = 1.12
+        lp_alpha = 0.14
+    elif kind == "Oboe":
+        partials = [(1, 1.0), (2, 0.58), (3, 0.48), (4, 0.34), (5, 0.22), (6, 0.15), (7, 0.11)]
+        noise_amt = 0.018
+        drive = 1.38
+        lp_alpha = 0.16
+
     # Generate floats first (simple normalization so instruments sit similarly in the mix)
     buf = [0.0] * length
     lp_state = 0.0
@@ -188,14 +231,17 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
 
         # detuned layer for softness/chorus
         if kind in ("Synth Pad", "Violin", "Sax"):
-            x += 0.18 * math.sin(2 * math.pi * (f * detune) * t)
+            x += 0.12 * math.sin(2 * math.pi * (f * detune) * t)
 
         if noise_amt > 0.0:
             x += (rng.uniform(-1.0, 1.0) * noise_amt)
 
-        # transient / pick noise for banjo
-        if kind == "Banjo" and t < 0.020:
-            x += math.sin(2 * math.pi * 3100 * t) * (0.10 * (1.0 - (t / 0.020)))
+        # transient / pick noise for plucked instruments
+        if kind in ("Banjo", "Acoustic Guitar", "Flamenco Guitar") and t < 0.020:
+            amt = 0.10 if kind == "Banjo" else (0.12 if kind == "Acoustic Guitar" else 0.15)
+            x += math.sin(2 * math.pi * 3100 * t) * (amt * (1.0 - (t / 0.020)))
+            if kind == "Flamenco Guitar":
+                x += math.sin(2 * math.pi * 4200 * t) * (0.06 * (1.0 - (t / 0.020)))
 
         # soften harshness
         if lp_alpha < 1.0:
@@ -449,7 +495,7 @@ def generate_mod(
     samples: list[bytes] = []
     for kind in inst_kinds:
         if kind not in sample_cache:
-            sample_cache[kind] = make_instrument_sample(kind, rng)
+            sample_cache[kind] = make_instrument_sample(kind, rng, f0=REF_F0)
         samples.append(sample_cache[kind])
     patterns, key_root = make_patterns(rng, enable_slowdown=enable_slowdown, speed=speed, tempo=tempo)
     pat_data = patterns_to_bytes(patterns)
@@ -499,7 +545,7 @@ def run_gui():
     from tkinter import ttk
 
     root = tk.Tk()
-    root.title("ProTracker MOD Choral Generator")
+    root.title("ProTracker MOD Choral Generator (v1.2)")
 
     frm = tk.Frame(root, padx=10, pady=10)
     frm.pack(fill="both", expand=True)
