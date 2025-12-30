@@ -10,7 +10,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <i><b>New in Commit 04fffbd (latest / 31.12.2025 v1.4.1):</b></i>
 
 
-- New interface with build-in spectrum analyser and play function (after rendering the output).
+- New interface with build-in spectrum analyser and play function (after rendering the Amiga Protracker output for your PC).
 
 <img width="1128" height="468" alt="v1_4_1" src="https://github.com/user-attachments/assets/789faa16-8d99-4c87-a560-377b3f629d64" />
 
