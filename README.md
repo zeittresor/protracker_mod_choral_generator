@@ -1,7 +1,7 @@
 # protracker_mod_choral_generator
 Generate Amiga Protracker compatible .mod files in church/choral/classic style.
 
-Just start it. After a moment you can find a new song (each run different melody) in the output folder (where the script is).
+Just start it and click "Generate". After a moment you can find a new song (each run different melody) in the output folder (where the script is).
 
 <br>
 
