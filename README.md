@@ -41,8 +41,6 @@ https://github.com/user-attachments/assets/7e936bdb-bee0-4873-adc5-1dc91365918b
 
 <img width="533" height="392" alt="sax" src="https://github.com/user-attachments/assets/a4a271db-2c13-4668-a5a0-34df8468c821" />
 
-Some Fun: If you did like the classic Game "Shadow of the Beast" (by Psygnosis) try to play around with the pattern order and the channel instruments and set the first and second channel to bajo, the third to panflute and the 4th channel again to banjo, might be be thats the result get a little bit similar.. x-)
-
 
 <i><b>New in Commit c6b427a (28.12.2025):</b></i>
 
