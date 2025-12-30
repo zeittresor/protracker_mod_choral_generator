@@ -18,6 +18,8 @@ Btw. not every song is great but most of them. ;-)
 - Added some more instruments to choose (Acoustic Guitar, Flamenco Guitar, Organ, Flute, Oboe)
 - Bugfix for the Instruments (all instruments use now the same reference-note to make them more harmonic to the other instruments)
 
+<img width="513" height="384" alt="grafik" src="https://github.com/user-attachments/assets/c3764adc-b564-4c7f-8ce2-0362e4e4e3ca" />
+
 
 <i><b>New in Commit 00cc274 (29.12.2025 v1.1):</b></i>
 
