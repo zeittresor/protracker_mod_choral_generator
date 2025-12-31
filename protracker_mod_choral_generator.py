@@ -1,8 +1,9 @@
-# protracker_mod_choral_generator.py
+#!/usr/bin/env python3
+# ProTracker MOD Choral Generator (v1.4.9)
 # source: github.com/zeittresor
 
-#!/usr/bin/env python3
 from __future__ import annotations
+
 import argparse
 import io
 import math
@@ -10,6 +11,7 @@ import os
 import random
 import re
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -546,14 +548,85 @@ def validate_order(order: list[int], n_patterns: int = 6) -> None:
 @dataclass
 class SongData:
     title_txt: str
+    seed: int
     key_root: str
     patterns: list
+    order_original: list[int]
     order: list[int]
     samples_bytes: list[bytes]
     samples_float: list[list[float]]
     instrument_kinds: list[str]
     speed: int
     tempo: int
+    slowdown_enabled: bool
+
+
+def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
+    note, samp, eff, par = cell
+    n = note if note is not None else "---"
+    s = f"{samp:02d}" if samp else "--"
+    e = f"{eff:X}{par:02X}" if (eff or par) else "---"
+    return f"{n} {s} {e}"
+
+
+def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
+    """Write a structured .txt sidecar next to the MOD.
+
+    Skips writing if the file already exists.
+    """
+    txt_path = mod_path.with_suffix(".txt")
+    if txt_path.exists():
+        return txt_path
+
+    lines: list[str] = []
+    lines.append("ProTracker MOD Choral Generator - Song Parameters")
+    lines.append("=")
+    lines.append(f"mod_file: {mod_path.name}")
+    lines.append(f"seed: {song.seed}")
+    lines.append(f"title: {song.title_txt}")
+    lines.append(f"key_root: {song.key_root}")
+    lines.append(f"speed: {song.speed}")
+    lines.append(f"tempo: {song.tempo}")
+    lines.append(f"slowdown_enabled: {bool(song.slowdown_enabled)}")
+    lines.append("")
+    lines.append("instruments:")
+    for i, k in enumerate(song.instrument_kinds, start=1):
+        lines.append(f"  ch{i}: {k} (sample {i})")
+    lines.append("")
+
+    lines.append("order_original:")
+    lines.append("  " + ", ".join(str(x) for x in song.order_original))
+    lines.append("order_final:")
+    lines.append("  " + ", ".join(str(x) for x in song.order))
+    lines.append("")
+
+    lines.append("patterns:")
+    # Keep it very readable and tracker-like.
+    for p_idx, pat in enumerate(song.patterns):
+        lines.append("")
+        lines.append(f"PATTERN {p_idx}:")
+        lines.append("row | CH1            | CH2            | CH3            | CH4")
+        lines.append("----+----------------+----------------+----------------+----------------")
+        for r in range(64):
+            c0 = _cell_to_text(pat[r][0])
+            c1 = _cell_to_text(pat[r][1])
+            c2 = _cell_to_text(pat[r][2])
+            c3 = _cell_to_text(pat[r][3])
+            lines.append(f"{r:02d}  | {c0:<14} | {c1:<14} | {c2:<14} | {c3:<14}")
+
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return txt_path
+
+
+def export_rendered_wav(wav_bytes: bytes, wav_path: Path) -> tuple[bool, str]:
+    """Export already-rendered WAV bytes to disk (skip if it already exists)."""
+    if wav_path.exists():
+        return False, "WAV already exists (skipped)."
+    try:
+        wav_path.write_bytes(wav_bytes)
+        return True, f"Exported WAV: {wav_path.name}"
+    except Exception as e:
+        return False, f"WAV export failed: {e}"
 
 
 def generate_song(
@@ -590,6 +663,8 @@ def generate_song(
         order = parse_order_string(DEFAULT_ORDER_STR)
     validate_order(order, n_patterns=len(patterns))
 
+    order_original = list(order)
+
     order_for_write = list(order)
     if enable_slowdown and len(order_for_write) > 0:
         src_pat = order_for_write[-1]
@@ -603,8 +678,8 @@ def generate_song(
     # Title
     section1 = ["The", "A", "A_dirty", "a_holy", "Another", "The_wildest", "A_crazy", "A_funny"]
     section2 = ["banana", "DJ", "pianist", "stardestroyer", "dentist", "pope", "dictator", "dancingqueen", "jungleman", "toilet", "strawberry"]
-    section3 = ["is_at", "move_to", "will_meet", "save_the", "want_see", "went_fast", "dance_fame", "just_get", "have_meet", "move_on", "make_on_to_a", "get_on_a", "linked_by_a"]
-    section4 = ["at_dancefloor__", "the_DJ__", "at_poolparty__", "at_busstation__", "to_heaven__", "ready_to_rock__", "disco__", "crazy__", "party__", "roll_around__", "fight__", "as_a_sausage__", "at_phonecall__"]
+    section3 = ["is_at", "move_to", "will_meet", "save_the", "want_see", "went_to", "dance_fame", "just_get", "have_meet", "move_on", "make_on_to", "get_on", "linked_by"]
+    section4 = ["a_dancefloor__", "the_DJ__", "at_poolparty__", "a_busstation__", "in_heaven__", "ready_to_rock__", "disco__", "crazy__", "party__", "roll_around__", "fight__", "a_sausage__", "a_phonecall__"]
     title_txt = f"{rng.choice(section1)}_{rng.choice(section2)}_{rng.choice(section3)}_{rng.choice(section4)}_{rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
 
@@ -639,14 +714,17 @@ def generate_song(
 
     song = SongData(
         title_txt=title_txt,
+        seed=int(seed),
         key_root=key_root,
         patterns=patterns,
+        order_original=order_original,
         order=order_for_write,
         samples_bytes=samples_bytes,
         samples_float=samples_float,
         instrument_kinds=inst_kinds,
         speed=int(speed),
         tempo=int(tempo),
+        slowdown_enabled=bool(enable_slowdown),
     )
 
     return path, song
@@ -787,7 +865,7 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
             if progress_cb is not None:
                 try:
                     progress_cb(done_rows, total_rows)
-                except Exception:
+                except BaseException:
                     pass
 
     interleaved = array("h")
@@ -808,84 +886,241 @@ def pcm16_to_wav_bytes(pcm16: bytes, sample_rate: int, nch: int = 2) -> bytes:
     return bio.getvalue()
 
 
+
 class Player:
+    """
+    Minimal playback helper.
+
+    - On Windows, prefers winsound (no extra dependencies).
+    - Otherwise, uses simpleaudio if installed.
+
+    We also keep our own start/duration timestamps so the GUI can animate the
+    spectrum analyzer even if the backend doesn't expose playhead position.
+    """
+
     def __init__(self):
         self._is_windows = sys.platform.startswith("win")
-        self._play_obj = None
+        self._backend: str | None = None  # "ps_soundplayer" / "winsound_file" / "simpleaudio"
+        self._play_obj = None            # simpleaudio.PlayObject
+        self._proc = None                # subprocess.Popen (Windows SoundPlayer backend)
         self._start_t = 0.0
         self._duration_s = 0.0
-        self._wav_bytes: bytes | None = None
         self._sr = 44100
+        self._lock = threading.Lock()
+        self._tmp_wav_path: str | None = None
 
-    def play(self, wav_bytes: bytes, sample_rate: int, total_frames: int):
+    @staticmethod
+    def _wav_info(wav_bytes: bytes) -> tuple[int, int, int, int, bytes]:
+        # returns: (nch, sampw, sr, frames, pcm_frames)
+        with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+            nch = int(wf.getnchannels())
+            sampw = int(wf.getsampwidth())
+            sr = int(wf.getframerate())
+            frames = int(wf.getnframes())
+            pcm = wf.readframes(frames)
+        return nch, sampw, sr, frames, pcm
+
+    def play(self, wav_bytes: bytes):
+        # Stop any previous playback first
         self.stop()
-        self._wav_bytes = wav_bytes
-        self._sr = sample_rate
-        self._duration_s = total_frames / float(sample_rate)
-        self._start_t = time.perf_counter()
 
-        # Windows: built-in winsound
+        nch, sampw, sr, frames, pcm = self._wav_info(wav_bytes)
+
+        with self._lock:
+            self._start_t = time.perf_counter()
+            self._duration_s = frames / float(max(1, sr))
+            self._sr = sr
+
+        # Windows: prefer a separate SoundPlayer process.
+        # This avoids a class of rare-but-nasty driver issues where stopping winsound playback
+        # can terminate the Python process on some systems.
         if self._is_windows:
             try:
-                import winsound  # type: ignore
+                import tempfile
 
-                winsound.PlaySound(wav_bytes, winsound.SND_ASYNC | winsound.SND_MEMORY)
-                self._play_obj = "winsound"
+                fd, tmp_path = tempfile.mkstemp(prefix="pt_preview_", suffix=".wav")
+                try:
+                    os.close(fd)
+                except Exception:
+                    pass
+                with open(tmp_path, "wb") as f:
+                    f.write(wav_bytes)
+
+                # PowerShell SoundPlayer (async via separate process)
+                # PlaySync keeps the process alive until audio ends; we can stop by terminating it.
+                cmd = [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"$p=New-Object System.Media.SoundPlayer '{tmp_path}'; $p.PlaySync();",
+                ]
+
+                creationflags = 0
+                if hasattr(subprocess, "CREATE_NO_WINDOW"):
+                    creationflags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+
+                with self._lock:
+                    self._backend = "ps_soundplayer"
+                    self._proc = proc
+                    self._play_obj = None
+                    self._tmp_wav_path = tmp_path
                 return
             except Exception:
-                self._play_obj = None
+                # fall back to winsound filename backend
+                try:
+                    import winsound  # type: ignore
+                    import tempfile
 
-        # Cross-platform fallback: simpleaudio if available
+                    fd, tmp_path = tempfile.mkstemp(prefix="pt_preview_", suffix=".wav")
+                    try:
+                        os.close(fd)
+                    except Exception:
+                        pass
+                    with open(tmp_path, "wb") as f:
+                        f.write(wav_bytes)
+                    winsound.PlaySound(tmp_path, winsound.SND_ASYNC | winsound.SND_FILENAME)
+                    with self._lock:
+                        self._backend = "winsound_file"
+                        self._tmp_wav_path = tmp_path
+                        self._proc = None
+                        self._play_obj = None
+                    return
+                except Exception:
+                    # fall through to simpleaudio
+                    pass
+
+        # Cross-platform: simpleaudio if available
         try:
             import simpleaudio  # type: ignore
 
-            wave_obj = simpleaudio.WaveObject(wav_bytes)
-            self._play_obj = wave_obj.play()
+            wave_obj = simpleaudio.WaveObject(pcm, nch, sampw, sr)
+            play_obj = wave_obj.play()
+            with self._lock:
+                self._backend = "simpleaudio"
+                self._play_obj = play_obj
             return
-        except Exception:
-            self._play_obj = None
+        except Exception as e:
+            with self._lock:
+                self._backend = None
+                self._play_obj = None
+                self._start_t = 0.0
+                self._duration_s = 0.0
             raise RuntimeError(
                 "Playback backend not available. On Windows this should work via winsound; otherwise install 'simpleaudio'."
-            )
+            ) from e
 
     def stop(self):
-        if self._play_obj is None:
-            return
+        with self._lock:
+            backend = self._backend
+            play_obj = self._play_obj
+            tmp_path = self._tmp_wav_path
+            proc = self._proc
+            self._backend = None
+            self._play_obj = None
+            self._tmp_wav_path = None
+            self._proc = None
+            self._start_t = 0.0
+            self._duration_s = 0.0
 
-        if self._play_obj == "winsound":
+        if backend == "ps_soundplayer":
+            try:
+                if proc is not None and proc.poll() is None:
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    # Give it a moment, then hard-kill if needed
+                    try:
+                        proc.wait(timeout=0.4)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+            except BaseException:
+                pass
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+        elif backend == "winsound_file":
             try:
                 import winsound  # type: ignore
-
-                winsound.PlaySound(None, winsound.SND_PURGE)
-            except Exception:
+                # Stop async playback. Using flags=0 is the most compatible way.
+                winsound.PlaySound(None, 0)
+            except BaseException:
                 pass
-        else:
+            # Best-effort cleanup of temp file
+            if tmp_path:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+        elif backend == "simpleaudio":
             try:
-                self._play_obj.stop()
+                if play_obj is not None:
+                    play_obj.stop()
             except Exception:
                 pass
-
-        self._play_obj = None
-        self._start_t = 0.0
-        self._duration_s = 0.0
-        self._wav_bytes = None
 
     def is_playing(self) -> bool:
-        if self._play_obj is None:
-            return False
-        if self._play_obj == "winsound":
-            # winsound doesn't expose state; approximate via time
-            return (time.perf_counter() - self._start_t) < self._duration_s
-        try:
-            return self._play_obj.is_playing()
-        except Exception:
+        with self._lock:
+            backend = self._backend
+            play_obj = self._play_obj
+            start_t = self._start_t
+            duration = self._duration_s
+            proc = self._proc
+
+        if backend is None or start_t <= 0.0 or duration <= 0.0:
             return False
 
+        if backend == "ps_soundplayer":
+            try:
+                if proc is not None and proc.poll() is None:
+                    return True
+            except Exception:
+                pass
+            # Fallback to time window
+            return (time.perf_counter() - start_t) < duration
+
+        if backend == "winsound_file":
+            return (time.perf_counter() - start_t) < duration
+
+        try:
+            return bool(play_obj.is_playing())  # type: ignore[attr-defined]
+        except Exception:
+            # Fallback to time window
+            return (time.perf_counter() - start_t) < duration
+
+    def start_time(self) -> float:
+        with self._lock:
+            return self._start_t
+
+    def duration_s(self) -> float:
+        with self._lock:
+            return self._duration_s
+
+    def backend_name(self) -> str:
+        with self._lock:
+            return self._backend or "none"
+
     def playback_sample_index(self) -> int:
-        if self._start_t <= 0.0:
+        with self._lock:
+            start_t = self._start_t
+            sr = self._sr
+        if start_t <= 0.0:
             return 0
-        t = max(0.0, time.perf_counter() - self._start_t)
-        return int(t * self._sr)
+        t = max(0.0, time.perf_counter() - start_t)
+        return int(t * sr)
 
 
 # -----------------------------
@@ -900,14 +1135,18 @@ except Exception:
     _HAS_NUMPY = False
 
 
+
 class SpectrumAnalyzer:
     def __init__(self, canvas, bars: int = 32, width: int = 520, height: int = 110):
         self.canvas = canvas
         self.bars = bars
         self.width = width
         self.height = height
-        self._ids: list[int] = []
+
+        # three stacked rectangles per bar (green/yellow/red)
+        self._bar_ids: list[tuple[int, int, int]] = []
         self._levels = [0.0] * bars
+        self._cleared = True
 
         self.canvas.configure(width=width, height=height, bg="#8f8f8f", highlightthickness=0)
 
@@ -920,21 +1159,35 @@ class SpectrumAnalyzer:
             y1 = height - pad
             # slot outline
             self.canvas.create_rectangle(x0, y0, x1, y1, outline="#6f6f6f", width=1)
-            # bar fill
-            rid = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#28ff28")
-            self._ids.append(rid)
+            # stacked bar fills (start collapsed at bottom)
+            g = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#28ff28")
+            y = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#ffd428")
+            r = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#ff3030")
+            self._bar_ids.append((g, y, r))
 
-        # precompute band edges
+        # precompute band edges (log-spaced)
         self._fmin = 60.0
         self._fmax = 5200.0
         self._edges = [self._fmin * ((self._fmax / self._fmin) ** (i / bars)) for i in range(bars + 1)]
+
+    def reset(self):
+        # snap all bars back to 0
+        self._levels = [0.0] * self.bars
+        self._cleared = True
+        pad = 6
+        y_bottom = self.height - pad
+        slot_w = (self.width - 2 * pad) / self.bars
+        for i, (gid, yid, rid) in enumerate(self._bar_ids):
+            x0 = pad + i * slot_w + 2
+            x1 = x0 + slot_w - 6
+            for item in (gid, yid, rid):
+                self.canvas.coords(item, x0, y_bottom, x1, y_bottom)
 
     def _compute_levels(self, mono: list[float], sr: int) -> list[float]:
         n = len(mono)
         if n < 64:
             return [0.0] * self.bars
 
-        # window
         if _HAS_NUMPY:
             x = _np.array(mono, dtype=_np.float32)
             win = _np.hanning(n).astype(_np.float32)
@@ -986,10 +1239,8 @@ class SpectrumAnalyzer:
 
         # extract mono window
         mono: list[float] = []
-        # byte offset
         off = i0 * 4
         end = i1 * 4
-        # manual unpack for speed
         for j in range(off, end, 4):
             l = int.from_bytes(pcm16[j : j + 2], byteorder="little", signed=True)
             r = int.from_bytes(pcm16[j + 2 : j + 4], byteorder="little", signed=True)
@@ -1001,22 +1252,47 @@ class SpectrumAnalyzer:
         mx = max(1e-9, max(raw))
         for i in range(self.bars):
             v = raw[i] / mx
-            # dB-ish compression
-            v = math.sqrt(v)
+            v = math.sqrt(v)  # mild compression
             self._levels[i] = self._levels[i] * 0.75 + v * 0.25
 
-        # draw
+        self._cleared = False
+
+        # draw (3-zone color: bottom green, mid yellow, top red)
         pad = 6
         y_bottom = self.height - pad
         slot_w = (self.width - 2 * pad) / self.bars
+        full_h = (self.height - 2 * pad)
 
-        for i, rid in enumerate(self._ids):
+        green_top = 0.60
+        yellow_top = 0.85
+
+        for i, (gid, yid, rid) in enumerate(self._bar_ids):
             x0 = pad + i * slot_w + 2
             x1 = x0 + slot_w - 6
-            h = (self.height - 2 * pad) * self._levels[i]
-            y0 = y_bottom - h
-            self.canvas.coords(rid, x0, y0, x1, y_bottom)
 
+            level = max(0.0, min(1.0, self._levels[i]))
+            h = full_h * level
+
+            hg = min(h, full_h * green_top)
+            hy = min(max(0.0, h - full_h * green_top), full_h * (yellow_top - green_top))
+            hr = max(0.0, h - full_h * yellow_top)
+
+            if hg > 0:
+                self.canvas.coords(gid, x0, y_bottom - hg, x1, y_bottom)
+            else:
+                self.canvas.coords(gid, x0, y_bottom, x1, y_bottom)
+
+            if hy > 0:
+                yy1 = y_bottom - hg
+                self.canvas.coords(yid, x0, yy1 - hy, x1, yy1)
+            else:
+                self.canvas.coords(yid, x0, y_bottom, x1, y_bottom)
+
+            if hr > 0:
+                yr1 = y_bottom - hg - hy
+                self.canvas.coords(rid, x0, yr1 - hr, x1, yr1)
+            else:
+                self.canvas.coords(rid, x0, y_bottom, x1, y_bottom)
 
 # -----------------------------
 # GUI (ProTracker-ish style)
@@ -1037,13 +1313,41 @@ def run_gui():
     preview_wav: bytes | None = None
     preview_sr = 44100
     preview_frames = 0
+    
+    # playback state (GUI-side)
+    play_state = "idle"  # idle | playing
+    play_started_t = 0.0
+    play_duration_s = 0.0
 
     render_lock = threading.Lock()
     render_thread: threading.Thread | None = None
 
     root = tk.Tk()
-    root.title("ProTracker MOD Choral Generator (v1.4.1)")
+    def _tk_exception_handler(exc, val, tb):
+        try:
+            import traceback as _tb
+            msg = "".join(_tb.format_exception(exc, val, tb))
+        except Exception:
+            msg = f"{exc}: {val}"
+        # Log to console and to the UI (best effort), but do not crash the app.
+        try:
+            print(msg, file=sys.stderr)
+        except Exception:
+            pass
+        try:
+            messagebox.showerror("Internal error", msg)
+        except Exception:
+            pass
+
+    root.report_callback_exception = _tk_exception_handler
+    root.title("ProTracker MOD Choral Generator (v1.4.9)")
     root.configure(bg="#8f8f8f")
+    # Keep a stable window size (prevents width jitter from varying filename lengths)
+    try:
+        root.geometry("1040x680")
+        root.minsize(1040, 680)
+    except Exception:
+        pass
 
     # Style (best-effort ProTracker vibe)
     style = ttk.Style()
@@ -1099,7 +1403,15 @@ def run_gui():
     slowdown_cb = ttk.Checkbutton(left, text="Enable slowdown to the end of the song", variable=slowdown_var, style="PT.TCheckbutton")
     slowdown_cb.grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
 
-    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=5, column=0, columnspan=2, sticky="w", padx=8)
+    export_wav_var = tk.BooleanVar(value=False)
+    export_wav_cb = ttk.Checkbutton(left, text="Export rendered songs as WAV", variable=export_wav_var, style="PT.TCheckbutton")
+    export_wav_cb.grid(row=5, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+
+    save_params_var = tk.BooleanVar(value=False)
+    save_params_cb = ttk.Checkbutton(left, text="Save song parameters", variable=save_params_var, style="PT.TCheckbutton")
+    save_params_cb.grid(row=6, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
+
+    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=7, column=0, columnspan=2, sticky="w", padx=8)
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
 
@@ -1108,18 +1420,18 @@ def run_gui():
         cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
         cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
 
-    add_inst_row(6, "CH1", inst_vars[0])
-    add_inst_row(7, "CH2", inst_vars[1])
-    add_inst_row(8, "CH3", inst_vars[2])
-    add_inst_row(9, "CH4", inst_vars[3])
+    add_inst_row(8, "CH1", inst_vars[0])
+    add_inst_row(9, "CH2", inst_vars[1])
+    add_inst_row(10, "CH3", inst_vars[2])
+    add_inst_row(11, "CH4", inst_vars[3])
 
     status_var = tk.StringVar(value="")
-    status = tk.Label(left, textvariable=status_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 9, "bold"), justify="left", anchor="w")
-    status.grid(row=10, column=0, columnspan=2, sticky="we", padx=8, pady=(10, 8))
+    status = tk.Label(left, textvariable=status_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 9, "bold"), justify="left", anchor="w", wraplength=260)
+    status.grid(row=12, column=0, columnspan=2, sticky="we", padx=8, pady=(10, 8))
 
     # buttons
     btn_frame = tk.Frame(left, bg="#8f8f8f")
-    btn_frame.grid(row=11, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    btn_frame.grid(row=13, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     gen_btn = ttk.Button(btn_frame, text="GENERATE", style="PT.TButton")
     play_btn = ttk.Button(btn_frame, text="PLAY", style="PT.TButton")
@@ -1168,6 +1480,61 @@ def run_gui():
         info_txt.see("end")
         info_txt.config(state="disabled")
 
+    def post_log(msg: str):
+        try:
+            root.after(0, lambda: log(msg))
+        except Exception:
+            pass
+
+    wav_state_lock = threading.Lock()
+    wav_exporting = False
+
+    def maybe_save_params():
+        nonlocal last_song, last_mod_path
+        if not save_params_var.get():
+            return
+        if last_song is None or last_mod_path is None:
+            return
+        try:
+            txt_path = last_mod_path.with_suffix(".txt")
+            existed = txt_path.exists()
+            p = save_song_parameters_txt(last_mod_path, last_song)
+            if existed:
+                log("Song parameters already saved (skipped).")
+            else:
+                log(f"Saved song parameters: {p.name}")
+        except Exception as e:
+            log(f"Save parameters failed: {e}")
+
+    def maybe_export_wav():
+        nonlocal wav_exporting
+        if not export_wav_var.get():
+            return
+        if last_mod_path is None:
+            return
+        with render_lock:
+            wavb = preview_wav
+        if wavb is None:
+            return
+        wav_path = last_mod_path.with_suffix(".wav")
+        if wav_path.exists():
+            return
+        with wav_state_lock:
+            if wav_exporting:
+                return
+            wav_exporting = True
+
+        def _worker(wav_bytes: bytes, out_path: Path):
+            nonlocal wav_exporting
+            try:
+                ok, msg = export_rendered_wav(wav_bytes, out_path)
+                post_log(msg)
+            finally:
+                with wav_state_lock:
+                    wav_exporting = False
+
+        threading.Thread(target=_worker, args=(wavb, wav_path), daemon=True).start()
+
     def stop_analyzer():
         nonlocal after_id
         if after_id is not None:
@@ -1179,12 +1546,23 @@ def run_gui():
 
     def analyzer_tick():
         nonlocal after_id
-        if preview_pcm and player.is_playing():
-            idx = player.playback_sample_index()
-            analyzer.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
-            after_id = root.after(50, analyzer_tick)
-        else:
-            after_id = root.after(200, analyzer_tick)
+        try:
+            if preview_pcm and play_state == "playing":
+                # Drive analyzer from wall-clock so it works for winsound too.
+                idx = int(max(0.0, time.perf_counter() - play_started_t) * preview_sr)
+                analyzer.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
+                after_id = root.after(50, analyzer_tick)
+            else:
+                # nothing playing -> snap back to 0
+                if not analyzer._cleared:
+                    analyzer.reset()
+                after_id = root.after(200, analyzer_tick)
+        except BaseException:
+            # Never let the analyzer crash the app.
+            try:
+                after_id = root.after(200, analyzer_tick)
+            except Exception:
+                pass
 
     analyzer_tick()
 
@@ -1199,7 +1577,26 @@ def run_gui():
 
     def on_generate():
         nonlocal last_song, last_mod_path, preview_pcm, preview_wav, preview_frames, preview_sr
+        nonlocal play_state, play_started_t, play_duration_s
         try:
+            # If something is currently playing, stop it before generating a new song.
+            if play_state == "playing":
+                try:
+                    player.stop()
+                except Exception:
+                    pass
+                play_state = "idle"
+                play_started_t = 0.0
+                play_duration_s = 0.0
+                try:
+                    render_var.set("")
+                except Exception:
+                    pass
+                try:
+                    _set_btn_states(can_generate=True, can_play=True, can_stop=False)
+                except Exception:
+                    pass
+            
             order_list = parse_order_string(order_var.get())
             validate_order(order_list, n_patterns=6)
 
@@ -1228,13 +1625,22 @@ def run_gui():
             status_var.set(f"MOD saved:\n{path.name}\nKey: {song.key_root}  |  Samples: 1..4")
             log(f"Generated: {path}")
             log(f"Instruments: {', '.join(song.instrument_kinds)}")
+
+            # Optional: write sidecar parameters immediately after generation.
+            try:
+                maybe_save_params()
+            except Exception:
+                pass
             try:
                 play_btn.state(["!disabled"])
                 stop_btn.state(["disabled"])
             except Exception:
                 pass
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
+        except BaseException as e:
+            try:
+                messagebox.showerror("Error", str(e))
+            except Exception:
+                pass
 
 
     # --- render/playback state ---
@@ -1248,7 +1654,7 @@ def run_gui():
     render_var = tk.StringVar(value="")
     render_lbl = tk.Label(left, textvariable=render_var, bg="#8f8f8f", fg="#1a1a1a",
                           font=("Courier New", 9, "bold"), justify="left", anchor="w")
-    render_lbl.grid(row=12, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    render_lbl.grid(row=14, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     def _set_btn_states(*, can_generate: bool, can_play: bool, can_stop: bool):
         gen_btn.state(["!disabled"] if can_generate else ["disabled"])
@@ -1298,12 +1704,13 @@ def run_gui():
 
     def on_play():
         nonlocal preview_wav, auto_play_after_render, is_rendering
+        nonlocal play_state, play_started_t, play_duration_s
         try:
             if last_song is None:
                 raise ValueError("No song generated yet.")
 
             # Already playing? Ignore.
-            if player.is_playing():
+            if play_state == "playing":
                 return
 
             with render_lock:
@@ -1311,7 +1718,24 @@ def run_gui():
 
             if ready:
                 assert preview_wav is not None
-                player.play(preview_wav, preview_sr, preview_frames)
+                player.play(preview_wav)
+                try:
+                    log("Playback backend running..")
+                except Exception:
+                    pass
+
+                # Optional exports
+                try:
+                    maybe_save_params()
+                except Exception:
+                    pass
+                try:
+                    maybe_export_wav()
+                except Exception:
+                    pass
+                play_state = "playing"
+                play_started_t = player.start_time()
+                play_duration_s = player.duration_s()
                 render_var.set("PLAYING")
                 log("PLAY")
                 _set_btn_states(can_generate=True, can_play=False, can_stop=True)
@@ -1321,92 +1745,182 @@ def run_gui():
             log("Rendering preview...")
             _start_render(last_song, auto_play=True)
 
-        except Exception as e:
-            messagebox.showerror("Playback", str(e))
+        except BaseException as e:
+            try:
+                messagebox.showerror("Playback", str(e))
+            except Exception:
+                pass
 
+    
     def _ui_tick():
         nonlocal is_rendering, auto_play_after_render
+        nonlocal play_state, play_started_t, play_duration_s
 
-        # Rendering progress / completion
-        if is_rendering:
-            with state_lock:
-                pct = int(max(0.0, min(1.0, render_progress)) * 100.0)
-                err = render_error
+        try:
+            # Rendering progress / completion
+            if is_rendering:
+                with state_lock:
+                    pct = int(max(0.0, min(1.0, render_progress)) * 100.0)
+                    err = render_error
 
-            render_var.set(f"RENDER {pct:3d}%")
+                render_var.set(f"RENDER {pct:3d}%")
 
-            if render_thread is not None and not render_thread.is_alive():
-                is_rendering = False
+                if render_thread is not None and not render_thread.is_alive():
+                    is_rendering = False
 
-                if err:
-                    if err == "Render cancelled":
-                        render_var.set("RENDER CANCELLED")
-                        log("Render cancelled.")
-                    else:
-                        render_var.set("RENDER FAILED")
-                        log(f"Render failed: {err}")
-                        try:
-                            messagebox.showerror("Render", err)
-                        except Exception:
-                            pass
-                    auto_play_after_render = False
-                    _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
-                else:
-                    # Render OK
-                    render_var.set("")
-                    if auto_play_after_render and last_song is not None:
-                        auto_play_after_render = False
-                        try:
-                            with render_lock:
-                                wavb = preview_wav
-                                frames = preview_frames
-                                sr = preview_sr
-                            if wavb is not None and frames > 0:
-                                player.play(wavb, sr, frames)
-                                render_var.set("PLAYING")
-                                log("PLAY")
-                                _set_btn_states(can_generate=True, can_play=False, can_stop=True)
-                            else:
-                                _set_btn_states(can_generate=True, can_play=True, can_stop=False)
-                        except Exception as e:
+                    if err:
+                        if err == "Render cancelled":
+                            render_var.set("RENDER CANCELLED")
+                            log("Render cancelled.")
+                        else:
+                            render_var.set("RENDER FAILED")
+                            log(f"Render failed: {err}")
                             try:
-                                messagebox.showerror("Playback", str(e))
+                                messagebox.showerror("Render", err)
                             except Exception:
                                 pass
-                            _set_btn_states(can_generate=True, can_play=True, can_stop=False)
-                    else:
+                        auto_play_after_render = False
                         _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
+                    else:
+                        # Render OK
+                        render_var.set("")
+                        if auto_play_after_render and last_song is not None:
+                            auto_play_after_render = False
+                            try:
+                                with render_lock:
+                                    wavb = preview_wav
+                                    frames = preview_frames
+                                if wavb is not None and frames > 0:
+                                    player.play(wavb)
+                                    try:
+                                        log("Playback backend running..")
+                                    except Exception:
+                                        pass
 
-        # Playback finished?
-        if (not is_rendering) and (last_song is not None) and (not player.is_playing()):
-            if render_var.get() == "PLAYING":
-                render_var.set("")
-            _set_btn_states(can_generate=True, can_play=True, can_stop=False)
+                                    # Optional exports
+                                    try:
+                                        maybe_save_params()
+                                    except Exception:
+                                        pass
+                                    try:
+                                        maybe_export_wav()
+                                    except Exception:
+                                        pass
+                                    play_state = "playing"
+                                    play_started_t = player.start_time()
+                                    play_duration_s = player.duration_s()
+                                    render_var.set("PLAYING")
+                                    log("PLAY")
+                                    _set_btn_states(can_generate=True, can_play=False, can_stop=True)
+                                else:
+                                    _set_btn_states(can_generate=True, can_play=True, can_stop=False)
+                            except Exception as e:
+                                try:
+                                    messagebox.showerror("Playback", str(e))
+                                except Exception:
+                                    pass
+                                _set_btn_states(can_generate=True, can_play=True, can_stop=False)
+                        else:
+                            _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
 
-        root.after(120, _ui_tick)
+            # Playback monitor (do NOT rely only on backend state; use wall clock too)
+            if play_state == "playing":
+                elapsed = max(0.0, time.perf_counter() - play_started_t)
+                backend_says_playing = False
+                try:
+                    backend_says_playing = player.is_playing()
+                except BaseException:
+                    backend_says_playing = True  # be conservative
+
+                if (play_duration_s > 0.0 and elapsed >= play_duration_s) or (not backend_says_playing and elapsed > 0.25):
+                    # Finished
+                    # Ensure we release any backend resources (e.g., temp WAV / helper process).
+                    try:
+                        player.stop()
+                    except BaseException:
+                        pass
+                    play_state = "idle"
+                    play_started_t = 0.0
+                    play_duration_s = 0.0
+                    if render_var.get() == "PLAYING":
+                        render_var.set("")
+                    _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
+                    try:
+                        analyzer.reset()
+                    except Exception:
+                        pass
+                else:
+                    # While playing, STOP should stay enabled
+                    _set_btn_states(can_generate=True, can_play=False, can_stop=True)
+
+        except BaseException as e:
+            # Never let UI tick stop forever.
+            try:
+                log(f"UI tick error: {e}")
+            except Exception:
+                pass
+        finally:
+            try:
+                root.after(120, _ui_tick)
+            except Exception:
+                pass
 
     _ui_tick()
 
     def on_stop():
-        nonlocal auto_play_after_render
-        auto_play_after_render = False
-        # Cancel render if running
+        nonlocal auto_play_after_render, is_rendering
+        nonlocal play_state, play_started_t, play_duration_s
         try:
-            render_cancel.set()
-        except Exception:
-            pass
+            auto_play_after_render = False
+
+            # Cancel render only if we are rendering
+            if is_rendering:
+                try:
+                    render_cancel.set()
+                except BaseException:
+                    pass
+
+            # Stop playback (safe even if not playing)
+            try:
+                player.stop()
+            except BaseException:
+                pass
+
+            play_state = "idle"
+            play_started_t = 0.0
+            play_duration_s = 0.0
+
+            try:
+                render_var.set("")
+            except BaseException:
+                pass
+
+            try:
+                log("STOP")
+            except BaseException:
+                pass
+            try:
+                analyzer.reset()
+            except Exception:
+                pass
+
+        except BaseException as e:
+            # Never let STOP kill the whole process (e.g., SystemExit from an audio backend).
+            try:
+                log(f"STOP handler caught: {e}")
+            except BaseException:
+                pass
+
+        # Always restore UI state
         try:
-            player.stop()
-        except Exception:
+            _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
+        except BaseException:
             pass
-        render_var.set("")
-        log("STOP")
-        _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
 
     def on_close():
         try:
             render_cancel.set()
-        except Exception:
+        except BaseException:
             pass
         try:
             player.stop()
