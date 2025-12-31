@@ -13,7 +13,9 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 - Improvements for the Spectrum Analyser
 - WAV export function added (optional)
-- TXT file export with all parameters / patterns added (optional) Example: https://github.com/zeittresor/protracker_mod_choral_generator/blob/main/mods_out/A_funny_pope_move_to_at_poolparty___9366_20251231_120230_key_D2.txt
+- TXT file export with all parameters / patterns added (optional)
+  
+  Example: https://github.com/zeittresor/protracker_mod_choral_generator/blob/main/mods_out/A_funny_pope_move_to_at_poolparty___9366_20251231_120230_key_D2.txt
 - Playback backend is running seperated from the main process now
 - Bug fixes
 
