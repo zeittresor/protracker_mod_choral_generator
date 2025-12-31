@@ -11,7 +11,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <i><b>New in Commit c27098e (latest / 31.12.2025 v1.4.9):</b></i>
 
 
-- Improvements for the Spectrum Analyser
+- Improvements for the Spectrum Analyzer
 - WAV export function added (optional)
 - TXT file export with all parameters / patterns added (optional)
   
