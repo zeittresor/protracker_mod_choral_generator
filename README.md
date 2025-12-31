@@ -7,7 +7,20 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit 04fffbd (latest / 31.12.2025 v1.4.1):</b></i>
+
+<i><b>New in Commit c27098e (latest / 31.12.2025 v1.4.9):</b></i>
+
+
+- Improvements for the Spectrum Analyser
+- WAV export function added (optional)
+- TXT file export with all parameters / patterns added (optional)
+- Playback backend is running seperated from the main process now
+- Bug fixes
+
+<img width="1042" height="720" alt="latest31" src="https://github.com/user-attachments/assets/81283d8e-8462-450b-a44c-09d37365cadd" />
+
+
+<i><b>New in Commit 04fffbd (31.12.2025 v1.4.1):</b></i>
 
 
 - New interface with build-in spectrum analyser and play function (after rendering the Amiga Protracker output for your PC).
