@@ -15,6 +15,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Improved Spectrum Analyzer graphics
 - Bug fixes
 
+<img width="1044" height="715" alt="grafik" src="https://github.com/user-attachments/assets/b28ec03c-f78a-4f15-b878-383dcc877b29" />
+
 
 <i><b>New in Commit c27098e (31.12.2025 v1.4.9):</b></i>
 
