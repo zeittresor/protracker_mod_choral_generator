@@ -18,6 +18,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
   Example: https://github.com/zeittresor/protracker_mod_choral_generator/blob/main/mods_out/A_funny_pope_move_to_at_poolparty___9366_20251231_120230_key_D2.txt
 - Playback backend is running seperated from the main process now
 - Bug fixes
+- Compiled Windows Executable Release Version 1.4.9 added
 
 <img width="1042" height="720" alt="latest31" src="https://github.com/user-attachments/assets/81283d8e-8462-450b-a44c-09d37365cadd" />
 
