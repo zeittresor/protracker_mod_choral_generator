@@ -8,7 +8,15 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <b>Changelog:</b>
 
 
-<i><b>New in Commit c27098e (latest / 31.12.2025 v1.4.9):</b></i>
+<i><b>New in Commit 856b706 (latest / 01.01.2026 v1.5.0):</b></i>
+
+
+- Added option to switch between Spectrum Analyzer and Channel Scope (by clicking on it)
+- Improved Spectrum Analyzer graphics
+- Bug fixes
+
+
+<i><b>New in Commit c27098e (31.12.2025 v1.4.9):</b></i>
 
 
 - Improvements for the Spectrum Analyzer
