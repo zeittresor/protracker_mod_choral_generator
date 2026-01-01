@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.4.9)
+# ProTracker MOD Choral Generator (v1.5.0)
 # source: github.com/zeittresor
 
 from __future__ import annotations
@@ -743,11 +743,13 @@ def _tick_seconds(tempo: int) -> float:
     return 2.5 / max(32, min(255, tempo))
 
 
-def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None, cancel_event: threading.Event | None = None) -> tuple[bytes, int]:
+
+def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None, cancel_event: threading.Event | None = None) -> tuple[bytes, int, list[array]]:
     # Very small MOD subset renderer (enough for our generator):
     # - Note on, sample select, Fxx speed/tempo.
     # - No finetune, no loops, no other effects.
     # - Fixed panning (ch1+ch4 left, ch2+ch3 right).
+    # Additionally returns per-channel mono int16 buffers for tracker-like scopes.
 
     # channel state
     chan_period = [0, 0, 0, 0]
@@ -758,23 +760,24 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
     speed = int(song.speed)
     tempo = int(song.tempo)
 
-    # Pre-calc panning
-    pan_l = [1.0, 0.0, 0.0, 1.0]
-    pan_r = [0.0, 1.0, 1.0, 0.0]
-
     mix_l = array("h")
     mix_r = array("h")
+    ch_out = [array("h"), array("h"), array("h"), array("h")]
 
     patterns = song.patterns
 
     total_rows = max(1, len(song.order) * 64)
     done_rows = 0
 
+    def _clamp01(x: float) -> float:
+        return -1.0 if x < -1.0 else (1.0 if x > 1.0 else x)
+
     for pat_id in song.order:
         pat = patterns[pat_id]
         for row in range(64):
             if cancel_event is not None and cancel_event.is_set():
                 raise RuntimeError('Render cancelled')
+
             # Apply row events
             for ch in range(4):
                 note, samp, eff, par = pat[row][ch]
@@ -807,57 +810,73 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
             for _ in range(n):
                 l = 0.0
                 r = 0.0
+                c0 = c1 = c2 = c3 = 0.0
 
-                # channel 0
+                # channel 0 (L)
                 if per0 > 0:
                     step = _freq_from_period(per0) / out_rate
                     samp_arr = (sp0, sp1, sp2, sp3)[sidx0]
                     i0 = int(pos0)
                     if i0 < len(samp_arr):
                         v = samp_arr[i0] * (vol0 / 64.0)
+                        c0 = v
                         l += v
                     pos0 += step
 
-                # channel 1
+                # channel 1 (R)
                 if per1 > 0:
                     step = _freq_from_period(per1) / out_rate
                     samp_arr = (sp0, sp1, sp2, sp3)[sidx1]
                     i1 = int(pos1)
                     if i1 < len(samp_arr):
                         v = samp_arr[i1] * (vol1 / 64.0)
+                        c1 = v
                         r += v
                     pos1 += step
 
-                # channel 2
+                # channel 2 (R)
                 if per2 > 0:
                     step = _freq_from_period(per2) / out_rate
                     samp_arr = (sp0, sp1, sp2, sp3)[sidx2]
                     i2 = int(pos2)
                     if i2 < len(samp_arr):
                         v = samp_arr[i2] * (vol2 / 64.0)
+                        c2 = v
                         r += v
                     pos2 += step
 
-                # channel 3
+                # channel 3 (L)
                 if per3 > 0:
                     step = _freq_from_period(per3) / out_rate
                     samp_arr = (sp0, sp1, sp2, sp3)[sidx3]
                     i3 = int(pos3)
                     if i3 < len(samp_arr):
                         v = samp_arr[i3] * (vol3 / 64.0)
+                        c3 = v
                         l += v
                     pos3 += step
 
                 # mild master gain to avoid clipping
                 l *= 0.25
                 r *= 0.25
+                c0 *= 0.25
+                c1 *= 0.25
+                c2 *= 0.25
+                c3 *= 0.25
 
-                # clamp
-                l = max(-1.0, min(1.0, l))
-                r = max(-1.0, min(1.0, r))
+                l = _clamp01(l)
+                r = _clamp01(r)
+                c0 = _clamp01(c0)
+                c1 = _clamp01(c1)
+                c2 = _clamp01(c2)
+                c3 = _clamp01(c3)
 
                 mix_l.append(int(l * 32767))
                 mix_r.append(int(r * 32767))
+                ch_out[0].append(int(c0 * 32767))
+                ch_out[1].append(int(c1 * 32767))
+                ch_out[2].append(int(c2 * 32767))
+                ch_out[3].append(int(c3 * 32767))
 
             chan_pos = [pos0, pos1, pos2, pos3]
 
@@ -873,7 +892,7 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
         interleaved.append(mix_l[i])
         interleaved.append(mix_r[i])
 
-    return interleaved.tobytes(), out_rate
+    return interleaved.tobytes(), out_rate, ch_out
 
 
 def pcm16_to_wav_bytes(pcm16: bytes, sample_rate: int, nch: int = 2) -> bytes:
@@ -1137,51 +1156,90 @@ except Exception:
 
 
 class SpectrumAnalyzer:
-    def __init__(self, canvas, bars: int = 32, width: int = 520, height: int = 110):
+    def __init__(self, canvas, bars: int = 32, width: int = 560, height: int = 160, segments: int = 22):
         self.canvas = canvas
-        self.bars = bars
-        self.width = width
-        self.height = height
+        self.bars = int(bars)
+        self.width = int(width)
+        self.height = int(height)
+        self.segments = max(8, int(segments))
 
-        # three stacked rectangles per bar (green/yellow/red)
-        self._bar_ids: list[tuple[int, int, int]] = []
-        self._levels = [0.0] * bars
+        self._levels = [0.0] * self.bars
         self._cleared = True
 
-        self.canvas.configure(width=width, height=height, bg="#8f8f8f", highlightthickness=0)
-
-        pad = 6
-        slot_w = (width - 2 * pad) / bars
-        for i in range(bars):
-            x0 = pad + i * slot_w
-            x1 = x0 + slot_w - 2
-            y0 = pad
-            y1 = height - pad
-            # slot outline
-            self.canvas.create_rectangle(x0, y0, x1, y1, outline="#6f6f6f", width=1)
-            # stacked bar fills (start collapsed at bottom)
-            g = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#28ff28")
-            y = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#ffd428")
-            r = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill="#ff3030")
-            self._bar_ids.append((g, y, r))
+        self.canvas.configure(width=self.width, height=self.height, bg="#8f8f8f", highlightthickness=0)
 
         # precompute band edges (log-spaced)
         self._fmin = 60.0
         self._fmax = 5200.0
-        self._edges = [self._fmin * ((self._fmax / self._fmin) ** (i / bars)) for i in range(bars + 1)]
+        self._edges = [self._fmin * ((self._fmax / self._fmin) ** (i / self.bars)) for i in range(self.bars + 1)]
+
+        self._pad = 6
+        self._full_h = (self.height - 2 * self._pad)
+        self._slot_w = (self.width - 2 * self._pad) / self.bars
+
+        # gradient colors (bottom->top: green -> yellow -> red)
+        self._seg_colors = self._make_gradient(self.segments)
+
+        # ids per bar: list of segment rect ids from bottom to top
+        self._seg_ids: list[list[int]] = []
+
+        for i in range(self.bars):
+            x0 = self._pad + i * self._slot_w
+            x1 = x0 + self._slot_w - 2
+            y0 = self._pad
+            y1 = self.height - self._pad
+
+            # slot outline
+            self.canvas.create_rectangle(x0, y0, x1, y1, outline="#6f6f6f", width=1)
+
+            segs: list[int] = []
+            # create collapsed segments (we'll place them on update)
+            for c in self._seg_colors:
+                rid = self.canvas.create_rectangle(x0 + 1, y1, x1 - 1, y1, outline="", fill=c)
+                segs.append(rid)
+            self._seg_ids.append(segs)
+
+    @staticmethod
+    def _lerp(a: int, b: int, t: float) -> int:
+        return int(round(a + (b - a) * t))
+
+    @classmethod
+    def _hex_lerp(cls, c0: tuple[int, int, int], c1: tuple[int, int, int], t: float) -> str:
+        r = cls._lerp(c0[0], c1[0], t)
+        g = cls._lerp(c0[1], c1[1], t)
+        b = cls._lerp(c0[2], c1[2], t)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    @classmethod
+    def _make_gradient(cls, n: int) -> list[str]:
+        green = (0x28, 0xff, 0x28)
+        yellow = (0xff, 0xd4, 0x28)
+        red = (0xff, 0x30, 0x30)
+
+        out: list[str] = []
+        if n <= 1:
+            return [cls._hex_lerp(green, red, 0.0)]
+
+        for i in range(n):
+            t = i / float(max(1, n - 1))
+            if t < 0.55:
+                tt = t / 0.55
+                out.append(cls._hex_lerp(green, yellow, tt))
+            else:
+                tt = (t - 0.55) / (1.0 - 0.55)
+                out.append(cls._hex_lerp(yellow, red, tt))
+        return out
 
     def reset(self):
-        # snap all bars back to 0
         self._levels = [0.0] * self.bars
         self._cleared = True
-        pad = 6
-        y_bottom = self.height - pad
-        slot_w = (self.width - 2 * pad) / self.bars
-        for i, (gid, yid, rid) in enumerate(self._bar_ids):
-            x0 = pad + i * slot_w + 2
-            x1 = x0 + slot_w - 6
-            for item in (gid, yid, rid):
-                self.canvas.coords(item, x0, y_bottom, x1, y_bottom)
+
+        y_bottom = self.height - self._pad
+        for i, segs in enumerate(self._seg_ids):
+            x0 = self._pad + i * self._slot_w + 2
+            x1 = x0 + self._slot_w - 6
+            for rid in segs:
+                self.canvas.coords(rid, x0, y_bottom, x1, y_bottom)
 
     def _compute_levels(self, mono: list[float], sr: int) -> list[float]:
         n = len(mono)
@@ -1207,10 +1265,10 @@ class SpectrumAnalyzer:
             return levels
 
         # Fallback: lightweight Goertzel at band centers
-        centers = [math.sqrt(self._edges[i] * self._edges[i + 1]) for i in range(self.bars)]
+        centers = [((self._edges[i] * self._edges[i + 1]) ** 0.5) for i in range(self.bars)]
         levels: list[float] = []
         for f in centers:
-            w = 2.0 * math.pi * f / sr
+            w = 2.0 * 3.141592653589793 * f / sr
             cw = math.cos(w)
             coeff = 2.0 * cw
             s_prev = 0.0
@@ -1224,7 +1282,6 @@ class SpectrumAnalyzer:
         return levels
 
     def update_from_pcm(self, pcm16: bytes, sr: int, sample_index: int, window: int = 1024):
-        # pcm16 is interleaved stereo int16
         if not pcm16:
             return
 
@@ -1232,8 +1289,8 @@ class SpectrumAnalyzer:
         if total_frames <= 0:
             return
 
-        i0 = max(0, min(total_frames - 1, sample_index))
-        i1 = min(total_frames, i0 + window)
+        i0 = max(0, min(total_frames - 1, int(sample_index)))
+        i1 = min(total_frames, i0 + int(window))
         if i1 - i0 < 64:
             return
 
@@ -1257,43 +1314,120 @@ class SpectrumAnalyzer:
 
         self._cleared = False
 
-        # draw (3-zone color: bottom green, mid yellow, top red)
-        pad = 6
-        y_bottom = self.height - pad
-        slot_w = (self.width - 2 * pad) / self.bars
-        full_h = (self.height - 2 * pad)
+        # draw with a smooth vertical gradient
+        y_bottom = self.height - self._pad
+        seg_h = self._full_h / float(self.segments)
 
-        green_top = 0.60
-        yellow_top = 0.85
-
-        for i, (gid, yid, rid) in enumerate(self._bar_ids):
-            x0 = pad + i * slot_w + 2
-            x1 = x0 + slot_w - 6
+        for i, segs in enumerate(self._seg_ids):
+            x0 = self._pad + i * self._slot_w + 2
+            x1 = x0 + self._slot_w - 6
 
             level = max(0.0, min(1.0, self._levels[i]))
-            h = full_h * level
+            h = self._full_h * level
+            full = int(h // seg_h)
+            frac = (h - full * seg_h) / seg_h if seg_h > 0 else 0.0
 
-            hg = min(h, full_h * green_top)
-            hy = min(max(0.0, h - full_h * green_top), full_h * (yellow_top - green_top))
-            hr = max(0.0, h - full_h * yellow_top)
+            # segments are bottom->top
+            for s_i, rid in enumerate(segs):
+                if s_i < full:
+                    y1 = y_bottom - s_i * seg_h
+                    y0 = y1 - seg_h
+                    self.canvas.coords(rid, x0, y0, x1, y1)
+                elif s_i == full and frac > 1e-3:
+                    y1 = y_bottom - s_i * seg_h
+                    y0 = y1 - (seg_h * frac)
+                    self.canvas.coords(rid, x0, y0, x1, y1)
+                else:
+                    self.canvas.coords(rid, x0, y_bottom, x1, y_bottom)
 
-            if hg > 0:
-                self.canvas.coords(gid, x0, y_bottom - hg, x1, y_bottom)
-            else:
-                self.canvas.coords(gid, x0, y_bottom, x1, y_bottom)
 
-            if hy > 0:
-                yy1 = y_bottom - hg
-                self.canvas.coords(yid, x0, yy1 - hy, x1, yy1)
-            else:
-                self.canvas.coords(yid, x0, y_bottom, x1, y_bottom)
+class OscilloscopeView:
+    """Tracker-like 4-channel scopes (click visualizer to toggle from spectrum)."""
 
-            if hr > 0:
-                yr1 = y_bottom - hg - hy
-                self.canvas.coords(rid, x0, yr1 - hr, x1, yr1)
-            else:
-                self.canvas.coords(rid, x0, y_bottom, x1, y_bottom)
+    def __init__(self, canvas, width: int = 560, height: int = 160):
+        self.canvas = canvas
+        self.width = int(width)
+        self.height = int(height)
+        self._pad = 6
+        self._cleared = True
 
+        self.canvas.configure(width=self.width, height=self.height, bg="#8f8f8f", highlightthickness=0)
+
+        self._scope_ids: list[int] = []
+        self._mid_ids: list[int] = []
+
+        inner_h = self.height - 2 * self._pad
+        self._slot_h = inner_h / 4.0
+
+        for ch in range(4):
+            x0 = self._pad
+            x1 = self.width - self._pad
+            y0 = self._pad + ch * self._slot_h
+            y1 = y0 + self._slot_h
+
+            self.canvas.create_rectangle(x0, y0, x1, y1, outline="#6f6f6f", width=1)
+            mid = (y0 + y1) * 0.5
+            mid_id = self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#6f6f6f")
+            self._mid_ids.append(mid_id)
+
+            # channel label
+            self.canvas.create_text(x0 + 18, y0 + 10, text=f"CH{ch+1}", fill="#1a1a1a", font=("Courier New", 9, "bold"))
+
+            # waveform polyline
+            line_id = self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#1a1a1a", width=1)
+            self._scope_ids.append(line_id)
+
+    def reset(self):
+        self._cleared = True
+        x0 = self._pad
+        x1 = self.width - self._pad
+        for ch, lid in enumerate(self._scope_ids):
+            y0 = self._pad + ch * self._slot_h
+            y1 = y0 + self._slot_h
+            mid = (y0 + y1) * 0.5
+            self.canvas.coords(lid, x0 + 1, mid, x1 - 1, mid)
+
+    def update_from_channels(self, ch_bufs: list[array], sr: int, sample_index: int, window: int = 1024):
+        if not ch_bufs or len(ch_bufs) < 4:
+            return
+
+        total_frames = min(len(ch_bufs[0]), len(ch_bufs[1]), len(ch_bufs[2]), len(ch_bufs[3]))
+        if total_frames <= 0:
+            return
+
+        i0 = max(0, min(total_frames - 1, int(sample_index)))
+        i1 = min(total_frames, i0 + int(window))
+        if i1 - i0 < 16:
+            return
+
+        x0 = self._pad
+        x1 = self.width - self._pad
+        w = max(16, int(x1 - x0 - 2))
+
+        # number of points drawn per scope
+        pts = min(320, i1 - i0, w)
+
+        for ch in range(4):
+            y0 = self._pad + ch * self._slot_h
+            y1 = y0 + self._slot_h
+            mid = (y0 + y1) * 0.5
+            amp = (self._slot_h * 0.42)
+
+            buf = ch_bufs[ch]
+            segment = buf[i0:i1]
+
+            coords: list[float] = []
+            # downsample by index mapping
+            for p in range(pts):
+                si = int(p * (len(segment) - 1) / max(1, pts - 1))
+                v = segment[si] / 32768.0
+                x = x0 + 1 + (p * (w - 1) / max(1, pts - 1))
+                y = mid - (v * amp)
+                coords.extend([x, y])
+
+            self.canvas.coords(self._scope_ids[ch], *coords)
+
+        self._cleared = False
 # -----------------------------
 # GUI (ProTracker-ish style)
 # -----------------------------
@@ -1313,6 +1447,7 @@ def run_gui():
     preview_wav: bytes | None = None
     preview_sr = 44100
     preview_frames = 0
+    preview_ch = None  # per-channel mono int16 arrays for scope view
     
     # playback state (GUI-side)
     play_state = "idle"  # idle | playing
@@ -1340,7 +1475,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.4.9)")
+    root.title("ProTracker MOD Choral Generator (v1.5.0)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -1453,15 +1588,49 @@ def run_gui():
     btn_frame.columnconfigure(1, weight=1)
     btn_frame.columnconfigure(2, weight=1)
 
-    # --- right: analyzer panel ---
+    # --- right: visualizer panel (click to toggle Spectrum / Scopes) ---
     title_bar = tk.Frame(right, bg="#8f8f8f")
-    title_bar.pack(fill="x", padx=10, pady=(10, 4))
+    title_bar.pack(fill="x", padx=10, pady=(10, 2))
 
-    tk.Label(title_bar, text="SPECTRUM ANALYZER", bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold")).pack(anchor="w")
+    viz_title_var = tk.StringVar(value="SPECTRUM ANALYZER")
+    viz_title_lbl = tk.Label(title_bar, textvariable=viz_title_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
+    viz_title_lbl.pack(anchor="w")
+
+    hint_lbl = tk.Label(title_bar, text="Click visualizer to toggle Spectrum / Scopes", bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 9, "bold"))
+    hint_lbl.pack(anchor="w")
 
     canvas = tk.Canvas(right)
     canvas.pack(fill="x", padx=10, pady=(0, 10))
-    analyzer = SpectrumAnalyzer(canvas, bars=32, width=560, height=120)
+
+    viz_mode = "spectrum"  # spectrum | scope
+    viz_view = None
+
+    def set_viz_mode(mode: str):
+        nonlocal viz_mode, viz_view
+        mode = (mode or "").strip().lower()
+        if mode not in ("spectrum", "scope"):
+            mode = "spectrum"
+        viz_mode = mode
+        try:
+            canvas.delete("all")
+        except Exception:
+            pass
+        if viz_mode == "spectrum":
+            viz_title_var.set("SPECTRUM ANALYZER")
+            viz_view = SpectrumAnalyzer(canvas, bars=32, width=560, height=160, segments=22)
+        else:
+            viz_title_var.set("CHANNEL SCOPES")
+            viz_view = OscilloscopeView(canvas, width=560, height=160)
+        try:
+            viz_view.reset()
+        except Exception:
+            pass
+
+    def _toggle_viz(_evt=None):
+        set_viz_mode("scope" if viz_mode == "spectrum" else "spectrum")
+
+    canvas.bind("<Button-1>", _toggle_viz)
+    set_viz_mode("spectrum")
 
     info_bar = tk.Frame(right, bg="#8f8f8f")
     info_bar.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -1547,18 +1716,31 @@ def run_gui():
     def analyzer_tick():
         nonlocal after_id
         try:
-            if preview_pcm and play_state == "playing":
-                # Drive analyzer from wall-clock so it works for winsound too.
+            if play_state == "playing":
                 idx = int(max(0.0, time.perf_counter() - play_started_t) * preview_sr)
-                analyzer.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
+                if viz_mode == "spectrum":
+                    if preview_pcm and viz_view is not None:
+                        try:
+                            viz_view.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
+                        except Exception:
+                            pass
+                else:
+                    if preview_ch and viz_view is not None:
+                        try:
+                            viz_view.update_from_channels(preview_ch, preview_sr, idx, window=1024)
+                        except Exception:
+                            pass
                 after_id = root.after(50, analyzer_tick)
             else:
                 # nothing playing -> snap back to 0
-                if not analyzer._cleared:
-                    analyzer.reset()
+                if viz_view is not None and not getattr(viz_view, "_cleared", False):
+                    try:
+                        viz_view.reset()
+                    except Exception:
+                        pass
                 after_id = root.after(200, analyzer_tick)
         except BaseException:
-            # Never let the analyzer crash the app.
+            # Never let the visualizer crash the app.
             try:
                 after_id = root.after(200, analyzer_tick)
             except Exception:
@@ -1576,7 +1758,7 @@ def run_gui():
         return v
 
     def on_generate():
-        nonlocal last_song, last_mod_path, preview_pcm, preview_wav, preview_frames, preview_sr
+        nonlocal last_song, last_mod_path, preview_pcm, preview_wav, preview_frames, preview_sr, preview_ch
         nonlocal play_state, play_started_t, play_duration_s
         try:
             # If something is currently playing, stop it before generating a new song.
@@ -1621,6 +1803,7 @@ def run_gui():
             preview_wav = None
             preview_frames = 0
             preview_sr = 44100
+            preview_ch = None
 
             status_var.set(f"MOD saved:\n{path.name}\nKey: {song.key_root}  |  Samples: 1..4")
             log(f"Generated: {path}")
@@ -1662,7 +1845,7 @@ def run_gui():
         stop_btn.state(["!disabled"] if can_stop else ["disabled"])
 
     def _render_preview_worker(song: SongData):
-        nonlocal preview_pcm, preview_wav, preview_frames, preview_sr, render_error
+        nonlocal preview_pcm, preview_wav, preview_frames, preview_sr, preview_ch, render_error
 
         def _prog(done: int, total: int):
             nonlocal render_progress
@@ -1670,13 +1853,14 @@ def run_gui():
                 render_progress = 0.0 if total <= 0 else (done / float(total))
 
         try:
-            pcm16, sr = render_song_to_pcm16(song, out_rate=44100, progress_cb=_prog, cancel_event=render_cancel)
+            pcm16, sr, chbufs = render_song_to_pcm16(song, out_rate=44100, progress_cb=_prog, cancel_event=render_cancel)
             wavb = pcm16_to_wav_bytes(pcm16, sr, nch=2)
             with render_lock:
                 preview_pcm = pcm16
                 preview_wav = wavb
                 preview_sr = sr
                 preview_frames = len(pcm16) // 4
+                preview_ch = chbufs
             with state_lock:
                 render_error = None
         except Exception as e:
@@ -1846,7 +2030,7 @@ def run_gui():
                         render_var.set("")
                     _set_btn_states(can_generate=True, can_play=(last_song is not None), can_stop=False)
                     try:
-                        analyzer.reset()
+                        viz_view.reset()
                     except Exception:
                         pass
                 else:
@@ -1900,7 +2084,7 @@ def run_gui():
             except BaseException:
                 pass
             try:
-                analyzer.reset()
+                viz_view.reset()
             except Exception:
                 pass
 
