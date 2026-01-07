@@ -16,6 +16,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Bug fixes
 
 <img width="1044" height="715" alt="grafik" src="https://github.com/user-attachments/assets/b28ec03c-f78a-4f15-b878-383dcc877b29" />
+<img width="1045" height="717" alt="optimisations" src="https://github.com/user-attachments/assets/24444b76-bdef-4e81-9308-2816c012f8c9" />
 
 
 <i><b>New in Commit c27098e (31.12.2025 v1.4.9):</b></i>
