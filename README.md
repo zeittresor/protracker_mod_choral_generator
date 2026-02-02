@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit d9dd7f1 (latest / 01.01.2026 v1.5.0):</b></i>
+<i><b>New in Commit d9dd7f1 (latest / 02.02.2026 v1.5.1):</b></i>
 
 - Selectable Base Song / Random
 - Unchecked Options
