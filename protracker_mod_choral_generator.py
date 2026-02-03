@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.5.1)
+# ProTracker MOD Choral Generator (v1.6.2)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -107,9 +107,448 @@ MELODY_LIBRARY: dict[str, list[list[tuple[int | None, int, int]]]] = {
         [(2, 0, 4), (1, 0, 4), (0, 0, 4), (2, 0, 4)],
         [(4, 0, 8), (2, 0, 4), (0, 0, 4)],
     ],
+
+    # More public domain / traditional-ish hymn & spiritual motifs (approx. phrasing)
+    "Amazing Grace (trad. approx.)": [
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (4, 0, 4)],
+        [(2, 0, 4), (4, 0, 4), (5, 0, 4), (4, 0, 4)],
+        [(2, 0, 4), (0, 0, 4), (2, 0, 4), (4, 0, 4)],
+        [(5, 0, 8), (4, 0, 4), (2, 0, 4)],
+    ],
+    "When the Saints (trad. approx.)": [
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (5, 0, 4)],
+        [(4, 0, 4), (2, 0, 4), (0, 0, 4), (2, 0, 4)],
+        [(4, 0, 4), (5, 0, 4), (6, 0, 4), (5, 0, 4)],
+        [(4, 0, 8), (2, 0, 4), (0, 0, 4)],
+    ],
+    "Swing Low (trad. approx.)": [
+        [(4, 0, 4), (2, 0, 4), (0, 0, 4), (2, 0, 4)],
+        [(4, 0, 4), (5, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(1, 0, 4), (0, 0, 8), (None, 0, 4)],
+    ],
+
+    # Additional original motifs for variety
+    "Gospel Walk (original)": [
+        [(0, 0, 4), (2, 0, 2), (3, 0, 2), (4, 0, 4), (5, 0, 4)],
+        [(5, 0, 2), (4, 0, 2), (3, 0, 4), (2, 0, 4), (0, 0, 4)],
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (6, 0, 4)],
+        [(5, 0, 8), (4, 0, 4), (2, 0, 4)],
+    ],
+    "Choral Rise (original)": [
+        [(0, 0, 2), (1, 0, 2), (2, 0, 4), (4, 0, 4), (3, 0, 4)],
+        [(2, 0, 4), (4, 0, 4), (5, 0, 4), (4, 0, 4)],
+        [(3, 0, 4), (2, 0, 4), (1, 0, 4), (0, 0, 4)],
+        [(2, 0, 8), (1, 0, 4), (0, 0, 4)],
+    ],
+    "Folk Wanderer (original)": [
+        [(0, 0, 4), (2, 0, 4), (1, 0, 4), (0, 0, 4)],
+        [(4, 0, 4), (5, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(1, 0, 4), (0, 0, 4), (2, 0, 4), (4, 0, 4)],
+        [(5, 0, 8), (2, 0, 4), (0, 0, 4)],
+    ],
+
 }
 
-MELODY_CHOICES = ["Random"] + list(MELODY_LIBRARY.keys())
+# -----------------------------
+# Melody plugins (txt / midi)
+# -----------------------------
+
+PLUGIN_DIR_NAME = "melody_plugins"
+
+NOTE_NAME_TO_SEMITONE = {
+    "C": 0, "C#": 1, "DB": 1,
+    "D": 2, "D#": 3, "EB": 3,
+    "E": 4,
+    "F": 5, "F#": 6, "GB": 6,
+    "G": 7, "G#": 8, "AB": 8,
+    "A": 9, "A#": 10, "BB": 10,
+    "B": 11,
+}
+C_MAJOR_PCS = [0, 2, 4, 5, 7, 9, 11]
+
+
+def _default_plugin_root() -> Path:
+    try:
+        here = Path(__file__).resolve().parent
+    except Exception:
+        here = Path.cwd()
+    return here / PLUGIN_DIR_NAME
+
+
+def _slugify(name: str) -> str:
+    s = (name or "").strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "melody"
+
+
+def _bars_to_plugin_text(display_name: str, bars: list[list[tuple[int | None, int, int]]]) -> str:
+    lines = []
+    lines.append(f"name: {display_name}")
+    lines.append("# format: DEG OCT DUR  (DEG=0..6, OCT=-2..2, DUR=rows; use R for rest)")
+    for bi, bar in enumerate(bars, start=1):
+        lines.append(f"# bar {bi}")
+        for deg, octv, dur in bar:
+            if deg is None:
+                lines.append(f"R 0 {int(dur)}")
+            else:
+                lines.append(f"{int(deg)} {int(octv)} {int(dur)}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def ensure_default_melody_plugins(plugin_root: Path) -> None:
+    """Create default plugin folders/files from the built-in melody library.
+
+    This runs only if the plugin dir (or individual melody files) are missing.
+    """
+    plugin_root.mkdir(parents=True, exist_ok=True)
+
+    for display_name, bars in MELODY_LIBRARY.items():
+        sub = plugin_root / _slugify(display_name)
+        sub.mkdir(parents=True, exist_ok=True)
+        p = sub / "melody.txt"
+        if not p.exists():
+            try:
+                p.write_text(_bars_to_plugin_text(display_name, bars), encoding="utf-8")
+            except Exception:
+                # best-effort; never crash the generator for plugin IO
+                pass
+
+
+def _parse_note_token_to_midi(tok: str) -> int | None:
+    """Parse either note tokens like C4, D#5, Bb3, or ProTracker-like C-3 / D#2."""
+    t = (tok or "").strip()
+    if not t:
+        return None
+    if t.upper() in ("R", "REST", "---"):
+        return None
+
+    # ProTracker: C-3, D#2, etc.
+    m = re.fullmatch(r"([A-Ga-g])([#bB]?)[-]?([0-9])", t)
+    if not m:
+        return None
+    letter = m.group(1).upper()
+    acc = m.group(2).upper()
+    octv = int(m.group(3))
+
+    key = letter + acc
+    if key not in NOTE_NAME_TO_SEMITONE:
+        key = letter
+    semi = NOTE_NAME_TO_SEMITONE.get(key)
+    if semi is None:
+        return None
+
+    # Map: ProTracker octave N corresponds roughly to MIDI octave (N+1) for our purpose
+    midi_oct = octv + 1
+    midi = (midi_oct + 1) * 12 + semi  # MIDI octave numbering: C-1=0
+    return int(midi)
+
+
+def _midi_note_to_degree_octv(midi_note: int) -> tuple[int, int]:
+    """Map MIDI note to (degree in C major, octave offset relative to C4).
+
+    We snap to nearest C-major pitch class for robustness.
+    """
+    pc = int(midi_note) % 12
+    best = None
+    best_dist = 999
+    for d, pc2 in enumerate(C_MAJOR_PCS):
+        dist = min((pc - pc2) % 12, (pc2 - pc) % 12)
+        if dist < best_dist:
+            best_dist = dist
+            best = (d, pc2)
+    deg = int(best[0]) if best else 0
+
+    # Choose snapped pitch in the closest octave to original
+    base = 60  # C4
+    # candidates around base +- 3 octaves
+    candidates = []
+    for o in range(-3, 4):
+        candidates.append(base + o * 12 + C_MAJOR_PCS[deg])
+    snapped = min(candidates, key=lambda x: abs(x - midi_note))
+
+    octv_off = int(round((snapped - base) / 12.0))
+    octv_off = max(-2, min(2, octv_off))
+    return deg, octv_off
+
+
+def _events_to_4bars_degree_template(events: list[tuple[int | None, int]]) -> list[list[tuple[int | None, int, int]]]:
+    """Convert (midi_note|None, dur_rows) to 4 bars of (deg|None, octv, dur)."""
+    # Ensure we cover 64 rows (4 bars) by looping if needed.
+    total = sum(max(1, int(d)) for _, d in events) if events else 0
+    if total <= 0:
+        events = [(60, 4), (62, 4), (64, 4), (65, 4), (67, 4), (69, 4), (71, 4), (72, 4)]
+
+    # Expand/loop into exactly 64 rows worth of events
+    out_ev: list[tuple[int | None, int]] = []
+    rows_left = 64
+    idx = 0
+    while rows_left > 0:
+        n, d = events[idx % len(events)]
+        d = max(1, int(d))
+        if d > rows_left:
+            d = rows_left
+        out_ev.append((n, d))
+        rows_left -= d
+        idx += 1
+
+    # Split into bars of 16 rows
+    bars: list[list[tuple[int | None, int, int]]] = []
+    cur: list[tuple[int | None, int, int]] = []
+    cur_rows = 0
+    for n, d in out_ev:
+        if n is None:
+            cur.append((None, 0, int(d)))
+        else:
+            deg, octv = _midi_note_to_degree_octv(int(n))
+            cur.append((deg, octv, int(d)))
+        cur_rows += int(d)
+        if cur_rows >= 16:
+            bars.append(cur)
+            cur = []
+            cur_rows = 0
+            if len(bars) == 4:
+                break
+
+    while len(bars) < 4:
+        bars.append([(0, 0, 16)])
+
+    return bars
+
+
+def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int, int]]]]:
+    """Parse plugin text. Supports:
+    - degree form: DEG OCT DUR (DEG 0..6, OCT int, DUR int)
+    - note form: NOTE DUR (NOTE like C4, D#4, Bb3, C-3)
+    """
+    name = path.parent.name
+    events: list[tuple[int | None, int]] = []
+
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for ln in lines:
+        s = ln.strip()
+        if not s or s.startswith("#") or s.startswith(";"):
+            continue
+        if s.lower().startswith("name:"):
+            name = s.split(":", 1)[1].strip() or name
+            continue
+
+        parts = re.split(r"\s+", s)
+        if len(parts) >= 3 and re.fullmatch(r"-?\d+|R", parts[0], re.I):
+            # DEG OCT DUR
+            deg_tok = parts[0]
+            if deg_tok.upper() == "R":
+                midi = None
+            else:
+                deg = int(deg_tok)
+                deg = max(0, min(6, deg))
+                # convert degree+octv to midi note in C major near C4
+                octv = int(parts[1])
+                dur = int(parts[2])
+                base = 60
+                midi = base + octv * 12 + C_MAJOR_PCS[deg]
+                events.append((midi, max(1, dur)))
+            if deg_tok.upper() == "R":
+                dur = int(parts[2])
+                events.append((None, max(1, dur)))
+            continue
+
+        if len(parts) >= 2:
+            # NOTE DUR
+            midi = _parse_note_token_to_midi(parts[0])
+            try:
+                dur = int(parts[1])
+            except Exception:
+                dur = 4
+            events.append((midi, max(1, dur)))
+
+    bars = _events_to_4bars_degree_template(events)
+    return name, bars
+
+
+def _read_vlq(data: bytes, i: int) -> tuple[int, int]:
+    v = 0
+    while True:
+        b = data[i]
+        i += 1
+        v = (v << 7) | (b & 0x7F)
+        if (b & 0x80) == 0:
+            break
+    return v, i
+
+
+def _parse_plugin_midi(path: Path) -> tuple[str, list[list[tuple[int | None, int, int]]]]:
+    """Very small MIDI parser for monophonic melodies.
+
+    Converts note durations to 'rows' assuming 4 rows per quarter note.
+    """
+    data = path.read_bytes()
+    name = path.parent.name
+    if not data.startswith(b"MThd"):
+        return name, _events_to_4bars_degree_template([(60, 4)])
+
+    hdr_len = int.from_bytes(data[4:8], "big")
+    fmt = int.from_bytes(data[8:10], "big")
+    ntr = int.from_bytes(data[10:12], "big")
+    tpq = int.from_bytes(data[12:14], "big")
+    off = 8 + hdr_len
+
+    # Collect note on/off with absolute tick times.
+    notes: list[tuple[int, int]] = []  # (midi, dur_ticks)
+
+    for _ in range(ntr):
+        if off + 8 > len(data) or data[off:off+4] != b"MTrk":
+            break
+        trk_len = int.from_bytes(data[off+4:off+8], "big")
+        trk = data[off+8:off+8+trk_len]
+        off += 8 + trk_len
+
+        t = 0
+        i = 0
+        running = None
+        on_map: dict[int, int] = {}
+
+        while i < len(trk):
+            dt, i = _read_vlq(trk, i)
+            t += dt
+            status = trk[i]
+            if status < 0x80:
+                if running is None:
+                    break
+                status = running
+            else:
+                i += 1
+                running = status
+
+            if status == 0xFF:
+                # meta
+                if i >= len(trk):
+                    break
+                meta_type = trk[i]
+                i += 1
+                ln, i = _read_vlq(trk, i)
+                payload = trk[i:i+ln]
+                i += ln
+                if meta_type == 0x03:
+                    # track name
+                    try:
+                        nm = payload.decode('utf-8', 'ignore').strip()
+                        if nm:
+                            name = nm
+                    except Exception:
+                        pass
+                continue
+
+            if status in (0xF0, 0xF7):
+                ln, i = _read_vlq(trk, i)
+                i += ln
+                continue
+
+            typ = status & 0xF0
+            if typ in (0x80, 0x90):
+                if i + 2 > len(trk):
+                    break
+                note = trk[i]
+                vel = trk[i+1]
+                i += 2
+                is_on = (typ == 0x90 and vel > 0)
+                if is_on:
+                    # If multiple, keep the highest (melody-ish)
+                    on_map[note] = t
+                else:
+                    t0 = on_map.pop(note, None)
+                    if t0 is not None and t > t0:
+                        notes.append((int(note), int(t - t0)))
+                continue
+
+            # Other MIDI events: skip params
+            if typ in (0xA0, 0xB0, 0xE0):
+                i += 2
+            elif typ in (0xC0, 0xD0):
+                i += 1
+            else:
+                # Unknown
+                break
+
+    # Convert to rows
+    events: list[tuple[int | None, int]] = []
+    for midi, dur_ticks in notes:
+        # quarter note = tpq ticks -> 4 rows
+        rows = int(round((dur_ticks / max(1, tpq)) * 4.0))
+        rows = max(1, min(16, rows))
+        events.append((midi, rows))
+
+    if not events:
+        events = [(60, 4), (62, 4), (64, 4), (65, 4), (67, 4), (69, 4), (71, 4), (72, 4)]
+
+    bars = _events_to_4bars_degree_template(events)
+    return name, bars
+
+
+def load_melody_plugins(plugin_root: Path) -> dict[str, list[list[tuple[int | None, int, int]]]]:
+    lib: dict[str, list[list[tuple[int | None, int, int]]]] = {}
+    if not plugin_root.exists():
+        return lib
+
+    for sub in sorted([p for p in plugin_root.iterdir() if p.is_dir()], key=lambda p: p.name.lower()):
+        try:
+            # Prefer conventional filenames so README files don't get mistaken as melodies.
+            preferred_midi = None
+            for cand in ("melody.mid", "melody.midi", "base.mid", "base.midi"): 
+                p = sub / cand
+                if p.exists():
+                    preferred_midi = p
+                    break
+            preferred_txt = None
+            for cand in ("melody.txt", "base.txt"): 
+                p = sub / cand
+                if p.exists():
+                    preferred_txt = p
+                    break
+
+            midi_files: list[Path] = []
+            txt_files: list[Path] = []
+            if preferred_midi is None:
+                midi_files = sorted([p for p in (list(sub.glob("*.mid")) + list(sub.glob("*.midi"))) if p.is_file()], key=lambda p: p.name.lower())
+            if preferred_txt is None:
+                txt_files = sorted([p for p in sub.glob("*.txt") if p.is_file() and p.name.lower() not in ("readme.txt", "info.txt")], key=lambda p: p.name.lower())
+
+            if preferred_midi is not None:
+                nm, bars = _parse_plugin_midi(preferred_midi)
+            elif preferred_txt is not None:
+                nm, bars = _parse_plugin_txt(preferred_txt)
+            elif midi_files:
+                nm, bars = _parse_plugin_midi(midi_files[0])
+            elif txt_files:
+                nm, bars = _parse_plugin_txt(txt_files[0])
+            else:
+                continue
+
+            nm = (nm or sub.name).strip()
+            if nm:
+                lib[nm] = bars
+        except Exception:
+            continue
+
+    return lib
+
+
+try:
+    _PLUGIN_ROOT = _default_plugin_root()
+    ensure_default_melody_plugins(_PLUGIN_ROOT)
+    PLUGIN_MELODIES = load_melody_plugins(_PLUGIN_ROOT)
+except Exception:
+    PLUGIN_MELODIES = {}
+
+
+def get_melody_choices() -> list[str]:
+    names = sorted(list(PLUGIN_MELODIES.keys()))
+    return ["Random", "Pure Random"] + names
+
+MELODY_CHOICES = get_melody_choices()
+
 # Reference fundamental for all generated samples (Hz). Tuned so that C-3 plays consistently across instruments.
 REF_F0 = 261.63
 
@@ -222,7 +661,7 @@ def _one_pole_lowpass(x: float, state: float, alpha: float) -> float:
     return state + alpha * (x - state)
 
 
-def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0) -> bytes:
+def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0, disable_vibrato: bool = False) -> bytes:
     kind = (kind or "").strip()
     if kind not in INSTRUMENT_CHOICES:
         kind = "Piano"
@@ -235,6 +674,9 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
     vib_amt = rng.uniform(0.0, 0.0030) if kind in ("Violin", "Synth Pad", "Panflute", "Flute") else rng.uniform(0.0, 0.0015)
 
     if kind == "Organ":
+        vib_amt = 0.0
+
+    if disable_vibrato:
         vib_amt = 0.0
 
     # Envelope choices (kept conservative so pitch feels stable)
@@ -557,12 +999,30 @@ def _mutate_events(
     return out
 
 
-def _pick_base_melody(rng: random.Random, melody_name: str | None) -> tuple[str, list[list[tuple[int | None, int, int]]]]:
-    if melody_name and melody_name in MELODY_LIBRARY:
-        return melody_name, MELODY_LIBRARY[melody_name]
-    keys = list(MELODY_LIBRARY.keys())
-    name = rng.choice(keys)
-    return name, MELODY_LIBRARY[name]
+def _pick_base_melody(
+    rng: random.Random,
+    melody_name: str | None,
+) -> tuple[str, list[list[tuple[int | None, int, int]]] | None]:
+    """Pick a base melody from plugins (preferred) or built-in fallback.
+
+    - melody_name == "Random": choose a random plugin melody
+    - melody_name == "Pure Random": return None => algorithmic base melody
+    - otherwise: pick by exact name if found
+    """
+    lib = PLUGIN_MELODIES if PLUGIN_MELODIES else MELODY_LIBRARY
+
+    if melody_name:
+        mn = str(melody_name).strip()
+        if mn.lower() == 'pure random':
+            return 'Pure Random', None
+        if mn not in ('Random', 'Pure Random') and mn in lib:
+            return mn, lib[mn]
+
+    if not lib:
+        return 'Pure Random', None
+
+    name = rng.choice(list(lib.keys()))
+    return name, lib[name]
 
 
 def make_patterns(
@@ -570,6 +1030,7 @@ def make_patterns(
     speed: int = DEFAULT_SPEED,
     tempo: int = DEFAULT_TEMPO,
     melody_name: str | None = None,
+    derive_mode: str | None = None,
 ):
     NUM_CH = 4
     ROWS = 64
@@ -580,7 +1041,18 @@ def make_patterns(
     scale_up = [note_shift(n, 12) for n in scale]
 
     base_melody_name, base_tpl = _pick_base_melody(rng, melody_name)
-    base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
+
+    if base_tpl is None:
+        # Pure algorithmic base melody (not shipped as a plugin by design)
+        base_prog = [0, 3, 4, 0]
+        base_bars = []
+        for deg in base_prog:
+            rt, th, fi = triad_from_degree(scale, deg, octave_bias=0)
+            chord = [note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12)]
+            chord = [n if n in CHROMATIC_SET else scale_up[0] for n in chord]
+            base_bars.append(build_bar_melody(rng, chord=chord, base_note=chord[0]))
+    else:
+        base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
 
     for _ in range(6):
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
@@ -594,10 +1066,6 @@ def make_patterns(
         if 0 <= row < 64:
             patterns[p][row][ch] = (note, samp, effect, param)
 
-    # speed+tempo commands on row0, keep row0 musically empty
-    set_cell(0, 0, 0, None, 0, 0x0F, max(1, min(31, int(speed))))
-    set_cell(0, 0, 1, None, 0, 0x0F, max(32, min(255, int(tempo))))
-
     progs = [
         [0, 3, 4, 0],
         [0, 4, 5, 3],
@@ -607,15 +1075,24 @@ def make_patterns(
         [0, 2, 3, 4],
     ]
 
-    mode_for_pattern = {0: 'base', 1: 'ornament', 2: 'transpose_up', 3: 'pad', 4: 'answer', 5: 'cadence'}
+    # Derivation style: Near = more recognizable, Far = motif-only (more variation)
+    dm = (derive_mode or 'Random').strip().lower()
+    if dm in ('random', 'auto'):
+        dm = rng.choice(['near', 'far'])
+    if dm.startswith('n') or dm.startswith('c'):
+        mode_for_pattern = {0: 'base', 1: 'ornament', 2: 'base', 3: 'pad', 4: 'answer', 5: 'cadence'}
+    else:
+        mode_for_pattern = {0: 'base', 1: 'ornament', 2: 'transpose_up', 3: 'pad', 4: 'answer', 5: 'cadence'}
+
+    derive_used = "Near" if (dm.startswith("n") or dm.startswith("c")) else "Far"
 
     for p_idx in range(6):
         prog = progs[p_idx]
         for bar, deg in enumerate(prog):
             r0 = bar * 16
             start_row = r0
-            if p_idx == 0 and bar == 0:
-                start_row = 1
+            # Allow notes to start on row 0. Speed/tempo effects are merged into
+            # the same row/cell (ProTracker supports note+effect together).
 
             if p_idx == 3:
                 bar_events = []
@@ -647,7 +1124,7 @@ def make_patterns(
             set_cell(p_idx, start_row, 2, bass)
             set_cell(p_idx, start_row, 3, third)
 
-            if p_idx not in (3,) and rng.random() < 0.55:
+            if p_idx != 3 and rng.random() < 0.55:
                 set_cell(p_idx, start_row + 8, 1, top)
                 set_cell(p_idx, start_row + 8, 2, bass)
 
@@ -696,9 +1173,17 @@ def make_patterns(
                 for i in range(0, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
 
-    return patterns, key_root, base_melody_name
+    # Ensure the selected speed/tempo is present in EVERY pattern (important when
+    # pattern orders start with something other than 0).
+    spd = max(1, min(31, int(speed)))
+    bpm = max(32, min(255, int(tempo)))
+    for pat in patterns:
+        n, s, eff, par = pat[0][0]
+        pat[0][0] = (n, s, 0x0F, spd)
+        n, s, eff, par = pat[0][1]
+        pat[0][1] = (n, s, 0x0F, bpm)
 
-
+    return patterns, key_root, base_melody_name, derive_used
 def apply_end_slowdown_to_pattern(pattern, rng: random.Random):
     slow_tempo = rng.choice([0x64, 0x5A, 0x50])  # 100 / 90 / 80 BPM
     for row in range(64):
@@ -759,6 +1244,8 @@ class SongData:
     speed: int
     tempo: int
     slowdown_enabled: bool
+    derive_mode: str
+    vibrato_disabled: bool
 
 
 def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
@@ -789,6 +1276,8 @@ def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
     lines.append(f"speed: {song.speed}")
     lines.append(f"tempo: {song.tempo}")
     lines.append(f"slowdown_enabled: {bool(song.slowdown_enabled)}")
+    lines.append(f"derive_mode: {getattr(song, 'derive_mode', '')}")
+    lines.append(f"vibrato_disabled: {bool(getattr(song, 'vibrato_disabled', False))}")
     lines.append("")
     lines.append("instruments:")
     for i, k in enumerate(song.instrument_kinds, start=1):
@@ -839,6 +1328,8 @@ def generate_song(
     tempo: int = DEFAULT_TEMPO,
     instruments: list[str] | None = None,
     melody_name: str | None = None,
+    derive_mode: str | None = "Random",
+    disable_vibrato: bool = False,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
@@ -850,16 +1341,17 @@ def generate_song(
     inst_kinds = normalize_instrument_list(instruments)
 
     # Generate sample bytes (4 slots). If the same instrument is selected, we still keep distinct sample numbers.
-    sample_cache: dict[str, bytes] = {}
+    sample_cache: dict[tuple[str, bool], bytes] = {}
     samples_bytes: list[bytes] = []
     for k in inst_kinds:
-        if k not in sample_cache:
-            sample_cache[k] = make_instrument_sample(k, rng, f0=REF_F0)
-        samples_bytes.append(sample_cache[k])
+        ck = (k, bool(disable_vibrato))
+        if ck not in sample_cache:
+            sample_cache[ck] = make_instrument_sample(k, rng, f0=REF_F0, disable_vibrato=bool(disable_vibrato))
+        samples_bytes.append(sample_cache[ck])
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
-    patterns, key_root, base_melody = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name)
+    patterns, key_root, base_melody, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode)
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
@@ -928,6 +1420,8 @@ def generate_song(
         speed=int(speed),
         tempo=int(tempo),
         slowdown_enabled=bool(enable_slowdown),
+        derive_mode=str(derive_used),
+        vibrato_disabled=bool(disable_vibrato),
     )
 
     return path, song
@@ -1574,7 +2068,7 @@ class OscilloscopeView:
             self._mid_ids.append(mid_id)
 
             # channel label
-            self.canvas.create_text(x0 + 18, y0 + 10, text=f"CH{ch+1}", fill="#1a1a1a", font=("Courier New", 9, "bold"))
+            self.canvas.create_text(x0 + 18, y0 + 10, text=f"CH{ch+1}", fill="#1a1a1a", font=("Courier New", 12, "bold"))
 
             # waveform polyline
             line_id = self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#1a1a1a", width=1)
@@ -1678,7 +2172,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.5.1)")
+    root.title("ProTracker MOD Choral Generator (v1.6.2)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -1732,29 +2226,40 @@ def run_gui():
     melody_combo = ttk.Combobox(left, textvariable=melody_var, values=MELODY_CHOICES, width=32, style="PT.TCombobox", state="readonly")
     melody_combo.grid(row=3, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
 
-    pt_label(left, "SPEED").grid(row=4, column=0, sticky="w", padx=8)
+    pt_label(left, "MELODY DERIVATION").grid(row=4, column=0, columnspan=2, sticky="w", padx=8)
+    derive_var = tk.StringVar(value="Random")
+    derive_combo = ttk.Combobox(left, textvariable=derive_var, values=["Random", "Near", "Far"], width=32, style="PT.TCombobox", state="readonly")
+    derive_combo.grid(row=5, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
+
+
+    pt_label(left, "SPEED").grid(row=6, column=0, sticky="w", padx=8)
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
     speed_entry = tk.Entry(left, textvariable=speed_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    speed_entry.grid(row=4, column=1, sticky="e", padx=8, pady=2)
+    speed_entry.grid(row=6, column=1, sticky="e", padx=8, pady=2)
 
-    pt_label(left, "TEMPO").grid(row=5, column=0, sticky="w", padx=8)
+    pt_label(left, "TEMPO").grid(row=7, column=0, sticky="w", padx=8)
     tempo_var = tk.StringVar(value=str(DEFAULT_TEMPO))
     tempo_entry = tk.Entry(left, textvariable=tempo_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    tempo_entry.grid(row=5, column=1, sticky="e", padx=8, pady=2)
+    tempo_entry.grid(row=7, column=1, sticky="e", padx=8, pady=2)
 
     slowdown_var = tk.BooleanVar(value=False)
     slowdown_cb = ttk.Checkbutton(left, text="Enable slowdown to the end of the song", variable=slowdown_var, style="PT.TCheckbutton")
-    slowdown_cb.grid(row=6, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
+    slowdown_cb.grid(row=8, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
 
-    export_wav_var = tk.BooleanVar(value=False)
+    # These two exports are useful defaults in practice.
+    export_wav_var = tk.BooleanVar(value=True)
     export_wav_cb = ttk.Checkbutton(left, text="Export rendered songs as WAV", variable=export_wav_var, style="PT.TCheckbutton")
-    export_wav_cb.grid(row=7, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    export_wav_cb.grid(row=9, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
 
-    save_params_var = tk.BooleanVar(value=False)
+    save_params_var = tk.BooleanVar(value=True)
     save_params_cb = ttk.Checkbutton(left, text="Save song parameters", variable=save_params_var, style="PT.TCheckbutton")
-    save_params_cb.grid(row=8, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
+    save_params_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    vibrato_var = tk.BooleanVar(value=False)
+    vibrato_cb = ttk.Checkbutton(left, text="Disable vibrato in samples", variable=vibrato_var, style="PT.TCheckbutton")
+    vibrato_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
 
-    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=9, column=0, columnspan=2, sticky="w", padx=8)
+
+    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=12, column=0, columnspan=2, sticky="w", padx=8)
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
 
@@ -1763,18 +2268,16 @@ def run_gui():
         cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
         cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
 
-    add_inst_row(10, "CH1", inst_vars[0])
-    add_inst_row(11, "CH2", inst_vars[1])
-    add_inst_row(12, "CH3", inst_vars[2])
-    add_inst_row(13, "CH4", inst_vars[3])
+    add_inst_row(13, "CH1", inst_vars[0])
+    add_inst_row(14, "CH2", inst_vars[1])
+    add_inst_row(15, "CH3", inst_vars[2])
+    add_inst_row(16, "CH4", inst_vars[3])
 
-    status_var = tk.StringVar(value="")
-    status = tk.Label(left, textvariable=status_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 9, "bold"), justify="left", anchor="w", wraplength=260)
-    status.grid(row=14, column=0, columnspan=2, sticky="we", padx=8, pady=(10, 8))
+    # Keep the left panel compact; song details are written to the log on the right.
 
     # buttons
     btn_frame = tk.Frame(left, bg="#8f8f8f")
-    btn_frame.grid(row=15, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    btn_frame.grid(row=18, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     gen_btn = ttk.Button(btn_frame, text="GENERATE", style="PT.TButton")
     play_btn = ttk.Button(btn_frame, text="PLAY", style="PT.TButton")
@@ -1804,7 +2307,7 @@ def run_gui():
     viz_title_lbl = tk.Label(title_bar, textvariable=viz_title_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
     viz_title_lbl.pack(anchor="w")
 
-    hint_lbl = tk.Label(title_bar, text="Click visualizer to toggle Spectrum / Scopes", bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 9, "bold"))
+    hint_lbl = tk.Label(title_bar, text="Click visualizer to toggle Spectrum / Scopes", bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 12, "bold"))
     hint_lbl.pack(anchor="w")
 
     canvas = tk.Canvas(right)
@@ -1842,9 +2345,24 @@ def run_gui():
 
     info_bar = tk.Frame(right, bg="#8f8f8f")
     info_bar.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    info_bar.columnconfigure(0, weight=1)
+    info_bar.rowconfigure(1, weight=1)
+
+    # Render / playback status belongs next to the log output (right side).
+    render_var = tk.StringVar(value="")
+    progress_lbl = tk.Label(
+        info_bar,
+        textvariable=render_var,
+        bg="#8f8f8f",
+        fg="#1a1a1a",
+        font=("Courier New", 14, "bold"),
+        anchor="w",
+        justify="left",
+    )
+    progress_lbl.grid(row=0, column=0, sticky="we", pady=(0, 6))
 
     info_txt = tk.Text(info_bar, height=7, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
-    info_txt.pack(fill="both", expand=True)
+    info_txt.grid(row=1, column=0, sticky="nsew")
     info_txt.insert("end", "Generate a song, then hit PLAY.\n")
     info_txt.config(state="disabled")
 
@@ -2002,6 +2520,8 @@ def run_gui():
                 tempo=bpm,
                 instruments=instruments,
                 melody_name=melody_var.get(),
+                derive_mode=derive_var.get(),
+                disable_vibrato=vibrato_var.get(),
             )
 
             last_song = song
@@ -2014,9 +2534,11 @@ def run_gui():
             preview_sr = 44100
             preview_ch = None
 
-            status_var.set(f"MOD saved:\n{path.name}\nKey: {song.key_root}  |  Melody: {song.base_melody}\nSamples: 1..4")
+            derive_txt = getattr(song, "derive_mode", "")
+            vib_txt = "OFF" if getattr(song, "vibrato_disabled", False) else "ON"
             log(f"Generated: {path}")
             log(f"Melody: {song.base_melody}")
+            log(f"Derive: {derive_txt} | Vibrato: {vib_txt}")
             log(f"Instruments: {', '.join(song.instrument_kinds)}")
 
             # Optional: write sidecar parameters immediately after generation.
@@ -2044,10 +2566,7 @@ def run_gui():
     is_rendering = False
     auto_play_after_render = False
 
-    render_var = tk.StringVar(value="")
-    render_lbl = tk.Label(left, textvariable=render_var, bg="#8f8f8f", fg="#1a1a1a",
-                          font=("Courier New", 9, "bold"), justify="left", anchor="w")
-    render_lbl.grid(row=16, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    # render_var is defined in the right-side log panel (next to the visualizer).
 
     def _set_btn_states(*, can_generate: bool, can_play: bool, can_stop: bool):
         gen_btn.state(["!disabled"] if can_generate else ["disabled"])
@@ -2351,6 +2870,9 @@ def main():
     ap.add_argument("-noslowdown", action="store_true", help="Disable ending slowdown at the end of the song.")
     ap.add_argument("-order", type=str, default=None, help="CLI: override pattern order string.")
     ap.add_argument("-melody", type=str, default=None, help="CLI: base melody preset name (or omit for Random).")
+    ap.add_argument("-derive", type=str, default="Random", choices=["Random", "Near", "Far"], help="CLI: melody derivation style (Random/Near/Far).")
+    ap.add_argument("-novibrato", action="store_true", help="CLI: disable vibrato in generated samples.")
+
     args = ap.parse_args()
 
     if not args.nogui:
@@ -2377,6 +2899,8 @@ def main():
         instruments=instruments,
         order=order_list,
         melody_name=(args.melody if args.melody else None),
+        derive_mode=args.derive,
+        disable_vibrato=bool(args.novibrato),
     )
     print(f"Generated: {path}")
 
