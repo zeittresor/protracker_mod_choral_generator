@@ -7,7 +7,16 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit d9dd7f1 (latest / 02.02.2026 v1.5.1):</b></i>
+
+<i><b>New in Commit bab5bc3 (latest / 03.02.2026 v1.6.2):</b></i>
+
+- Plugin Library added (you can add now TXT and/or MID/MIDI Files for own base melodies
+- Bugfixes and Improvements added
+
+<img width="1044" height="714" alt="v162" src="https://github.com/user-attachments/assets/2544a37b-1825-4df6-9093-ca51e0999c03" />
+
+
+<i><b>New in Commit d9dd7f1 (02.02.2026 v1.5.1):</b></i>
 
 - Selectable Base Song / Random
 - Unchecked Options
