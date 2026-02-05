@@ -17,6 +17,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <img width="1043" height="712" alt="v163" src="https://github.com/user-attachments/assets/3e67d973-f817-42d0-81fe-19d5e29864ad" />
 
+https://github.com/user-attachments/assets/e1878c28-d29d-47fc-b04f-089daad467f8
+
 
 <i><b>New in Commit bab5bc3 (03.02.2026 v1.6.2):</b></i>
 
