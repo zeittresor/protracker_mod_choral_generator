@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.6.2)
+# ProTracker MOD Choral Generator (v1.6.3)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -198,6 +198,61 @@ def _bars_to_plugin_text(display_name: str, bars: list[list[tuple[int | None, in
     return "\n".join(lines).rstrip() + "\n"
 
 
+@dataclass
+class MelodyPlugin:
+    name: str
+    bars: list[list[tuple[int | None, int, int]]]
+    meta: dict[str, str]
+    folder: Path
+    source: Path
+
+
+def _parse_kv_metadata_line(s: str) -> tuple[str, str] | None:
+    """Parse simple 'key: value' metadata lines."""
+    if not s or ":" not in s:
+        return None
+    k, v = s.split(":", 1)
+    k = k.strip().lower().replace(" ", "_")
+    v = v.strip()
+    if not k or not v:
+        return None
+    # ignore 'name:' here (handled elsewhere)
+    if k == "name":
+        return None
+    return k, v
+
+
+def _read_plugin_metadata(folder: Path) -> dict[str, str]:
+    meta: dict[str, str] = {}
+    for fn in ("info.txt", "meta.txt", "metadata.txt"):
+        p = folder / fn
+        if not p.exists():
+            continue
+        try:
+            for ln in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#") or s.startswith(";"):
+                    continue
+                kv = _parse_kv_metadata_line(s)
+                if kv:
+                    meta[kv[0]] = kv[1]
+        except Exception:
+            pass
+    return meta
+
+
+def _default_plugin_info_text(display_name: str) -> str:
+    n = (display_name or "").lower()
+    mode = "minor" if ("minor" in n or "moll" in n) else "major"
+    tempo_hint = "90-140" if mode == "minor" else "100-150"
+    preferred_key_range = "C-2..G-2"
+    return (
+        f"mode: {mode}\n"
+        f"tempo_hint: {tempo_hint}\n"
+        f"preferred_key_range: {preferred_key_range}\n"
+    )
+
+
 def ensure_default_melody_plugins(plugin_root: Path) -> None:
     """Create default plugin folders/files from the built-in melody library.
 
@@ -214,6 +269,13 @@ def ensure_default_melody_plugins(plugin_root: Path) -> None:
                 p.write_text(_bars_to_plugin_text(display_name, bars), encoding="utf-8")
             except Exception:
                 # best-effort; never crash the generator for plugin IO
+                pass
+
+        info = sub / "info.txt"
+        if not info.exists():
+            try:
+                info.write_text(_default_plugin_info_text(display_name), encoding="utf-8")
+            except Exception:
                 pass
 
 
@@ -318,12 +380,16 @@ def _events_to_4bars_degree_template(events: list[tuple[int | None, int]]) -> li
     return bars
 
 
-def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int, int]]]]:
-    """Parse plugin text. Supports:
+def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int, int]]], dict[str, str]]:
+    """Parse plugin text.
+
+    Supports:
+    - metadata lines: key: value
     - degree form: DEG OCT DUR (DEG 0..6, OCT int, DUR int)
     - note form: NOTE DUR (NOTE like C4, D#4, Bb3, C-3)
     """
     name = path.parent.name
+    meta: dict[str, str] = {}
     events: list[tuple[int | None, int]] = []
 
     lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -335,24 +401,33 @@ def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int,
             name = s.split(":", 1)[1].strip() or name
             continue
 
+        kv = _parse_kv_metadata_line(s)
+        if kv:
+            meta[kv[0]] = kv[1]
+            continue
+
         parts = re.split(r"\s+", s)
         if len(parts) >= 3 and re.fullmatch(r"-?\d+|R", parts[0], re.I):
             # DEG OCT DUR
             deg_tok = parts[0]
+            try:
+                dur = int(parts[2])
+            except Exception:
+                dur = 4
+
             if deg_tok.upper() == "R":
-                midi = None
+                events.append((None, max(1, dur)))
             else:
                 deg = int(deg_tok)
                 deg = max(0, min(6, deg))
                 # convert degree+octv to midi note in C major near C4
-                octv = int(parts[1])
-                dur = int(parts[2])
+                try:
+                    octv = int(parts[1])
+                except Exception:
+                    octv = 0
                 base = 60
                 midi = base + octv * 12 + C_MAJOR_PCS[deg]
                 events.append((midi, max(1, dur)))
-            if deg_tok.upper() == "R":
-                dur = int(parts[2])
-                events.append((None, max(1, dur)))
             continue
 
         if len(parts) >= 2:
@@ -365,7 +440,7 @@ def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int,
             events.append((midi, max(1, dur)))
 
     bars = _events_to_4bars_degree_template(events)
-    return name, bars
+    return name, bars, meta
 
 
 def _read_vlq(data: bytes, i: int) -> tuple[int, int]:
@@ -487,8 +562,8 @@ def _parse_plugin_midi(path: Path) -> tuple[str, list[list[tuple[int | None, int
     return name, bars
 
 
-def load_melody_plugins(plugin_root: Path) -> dict[str, list[list[tuple[int | None, int, int]]]]:
-    lib: dict[str, list[list[tuple[int | None, int, int]]]] = {}
+def load_melody_plugins(plugin_root: Path) -> dict[str, MelodyPlugin]:
+    lib: dict[str, MelodyPlugin] = {}
     if not plugin_root.exists():
         return lib
 
@@ -496,13 +571,14 @@ def load_melody_plugins(plugin_root: Path) -> dict[str, list[list[tuple[int | No
         try:
             # Prefer conventional filenames so README files don't get mistaken as melodies.
             preferred_midi = None
-            for cand in ("melody.mid", "melody.midi", "base.mid", "base.midi"): 
+            for cand in ("melody.mid", "melody.midi", "base.mid", "base.midi"):
                 p = sub / cand
                 if p.exists():
                     preferred_midi = p
                     break
+
             preferred_txt = None
-            for cand in ("melody.txt", "base.txt"): 
+            for cand in ("melody.txt", "base.txt"):
                 p = sub / cand
                 if p.exists():
                     preferred_txt = p
@@ -513,26 +589,50 @@ def load_melody_plugins(plugin_root: Path) -> dict[str, list[list[tuple[int | No
             if preferred_midi is None:
                 midi_files = sorted([p for p in (list(sub.glob("*.mid")) + list(sub.glob("*.midi"))) if p.is_file()], key=lambda p: p.name.lower())
             if preferred_txt is None:
-                txt_files = sorted([p for p in sub.glob("*.txt") if p.is_file() and p.name.lower() not in ("readme.txt", "info.txt")], key=lambda p: p.name.lower())
+                txt_files = sorted([p for p in sub.glob("*.txt") if p.is_file() and p.name.lower() not in ("readme.txt", "info.txt", "meta.txt", "metadata.txt")], key=lambda p: p.name.lower())
 
+            src: Path | None = None
+            file_meta: dict[str, str] = {}
             if preferred_midi is not None:
+                src = preferred_midi
                 nm, bars = _parse_plugin_midi(preferred_midi)
             elif preferred_txt is not None:
-                nm, bars = _parse_plugin_txt(preferred_txt)
+                src = preferred_txt
+                nm, bars, file_meta = _parse_plugin_txt(preferred_txt)
             elif midi_files:
+                src = midi_files[0]
                 nm, bars = _parse_plugin_midi(midi_files[0])
             elif txt_files:
-                nm, bars = _parse_plugin_txt(txt_files[0])
+                src = txt_files[0]
+                nm, bars, file_meta = _parse_plugin_txt(txt_files[0])
             else:
                 continue
 
             nm = (nm or sub.name).strip()
-            if nm:
-                lib[nm] = bars
+            if not nm or src is None:
+                continue
+
+            # Merge metadata:
+            # - metadata embedded in melody.txt
+            # - info/meta files next to the melody (also works for MIDI)
+            info_meta = _read_plugin_metadata(sub)
+            meta = dict(file_meta)
+            meta.update(info_meta)
+
+            # De-duplicate names (keep stable order)
+            base_nm = nm
+            if base_nm in lib:
+                i = 2
+                while f"{base_nm} ({i})" in lib:
+                    i += 1
+                nm = f"{base_nm} ({i})"
+
+            lib[nm] = MelodyPlugin(name=nm, bars=bars, meta=meta, folder=sub, source=src)
         except Exception:
             continue
 
     return lib
+
 
 
 try:
@@ -548,6 +648,40 @@ def get_melody_choices() -> list[str]:
     return ["Random", "Pure Random"] + names
 
 MELODY_CHOICES = get_melody_choices()
+
+def reload_melody_plugins() -> list[str]:
+    """Reload melody plugins from disk (used by the GUI Refresh button)."""
+    global PLUGIN_MELODIES, MELODY_CHOICES, _PLUGIN_ROOT
+    try:
+        _PLUGIN_ROOT = _default_plugin_root()
+        ensure_default_melody_plugins(_PLUGIN_ROOT)
+        PLUGIN_MELODIES = load_melody_plugins(_PLUGIN_ROOT)
+    except Exception:
+        PLUGIN_MELODIES = {}
+    MELODY_CHOICES = get_melody_choices()
+    return MELODY_CHOICES
+
+
+def get_plugin_metadata_display(name: str) -> str:
+    try:
+        pl = PLUGIN_MELODIES.get(name)
+        if isinstance(pl, MelodyPlugin):
+            meta = pl.meta or {}
+            if not meta:
+                return ""
+            order = ["mode", "preferred_key_range", "tempo_hint"]
+            parts = []
+            for k in order:
+                if k in meta:
+                    parts.append(f"{k}={meta[k]}")
+            # Add any extra keys (stable)
+            for k in sorted([k for k in meta.keys() if k not in order]):
+                parts.append(f"{k}={meta[k]}")
+            return " | ".join(parts)
+    except Exception:
+        pass
+    return ""
+
 
 # Reference fundamental for all generated samples (Hz). Tuned so that C-3 plays consistently across instruments.
 REF_F0 = 261.63
@@ -1002,28 +1136,43 @@ def _mutate_events(
 def _pick_base_melody(
     rng: random.Random,
     melody_name: str | None,
-) -> tuple[str, list[list[tuple[int | None, int, int]]] | None]:
-    """Pick a base melody from plugins (preferred) or built-in fallback.
+) -> tuple[str, list[list[tuple[int | None, int, int]]] | None, dict[str, str]]:
+    """Pick a base melody.
 
-    - melody_name == "Random": choose a random plugin melody
+    - melody_name == "Random": choose a random plugin melody (if any)
     - melody_name == "Pure Random": return None => algorithmic base melody
-    - otherwise: pick by exact name if found
+    - otherwise: pick by exact name if found (plugins first, then built-in fallback)
     """
-    lib = PLUGIN_MELODIES if PLUGIN_MELODIES else MELODY_LIBRARY
-
     if melody_name:
         mn = str(melody_name).strip()
-        if mn.lower() == 'pure random':
-            return 'Pure Random', None
-        if mn not in ('Random', 'Pure Random') and mn in lib:
-            return mn, lib[mn]
+        if mn.lower() == "pure random":
+            return "Pure Random", None, {}
 
-    if not lib:
-        return 'Pure Random', None
+        # Plugin melodies
+        if mn not in ("Random", "Pure Random") and mn in PLUGIN_MELODIES:
+            pl = PLUGIN_MELODIES[mn]
+            if isinstance(pl, MelodyPlugin):
+                return mn, pl.bars, dict(pl.meta or {})
+            # (old fallback)
+            return mn, pl, {}
 
-    name = rng.choice(list(lib.keys()))
-    return name, lib[name]
+        # Built-in fallback (should rarely be used because we auto-seed plugins)
+        if mn not in ("Random", "Pure Random") and mn in MELODY_LIBRARY:
+            return mn, MELODY_LIBRARY[mn], {}
 
+    # Random selection
+    if PLUGIN_MELODIES:
+        nm = rng.choice(list(PLUGIN_MELODIES.keys()))
+        pl = PLUGIN_MELODIES[nm]
+        if isinstance(pl, MelodyPlugin):
+            return nm, pl.bars, dict(pl.meta or {})
+        return nm, pl, {}
+
+    if MELODY_LIBRARY:
+        nm = rng.choice(list(MELODY_LIBRARY.keys()))
+        return nm, MELODY_LIBRARY[nm], {}
+
+    return "Pure Random", None, {}
 
 def make_patterns(
     rng: random.Random,
@@ -1040,7 +1189,7 @@ def make_patterns(
     scale = major_scale(key_root)
     scale_up = [note_shift(n, 12) for n in scale]
 
-    base_melody_name, base_tpl = _pick_base_melody(rng, melody_name)
+    base_melody_name, base_tpl, base_meta = _pick_base_melody(rng, melody_name)
 
     if base_tpl is None:
         # Pure algorithmic base melody (not shipped as a plugin by design)
@@ -1050,7 +1199,7 @@ def make_patterns(
             rt, th, fi = triad_from_degree(scale, deg, octave_bias=0)
             chord = [note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12)]
             chord = [n if n in CHROMATIC_SET else scale_up[0] for n in chord]
-            base_bars.append(build_bar_melody(rng, chord=chord, base_note=chord[0]))
+            base_bars.append(build_bar_melody(rng, scale=scale_up, chord=chord, base_note=chord[0]))
     else:
         base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
 
@@ -1183,7 +1332,7 @@ def make_patterns(
         n, s, eff, par = pat[0][1]
         pat[0][1] = (n, s, 0x0F, bpm)
 
-    return patterns, key_root, base_melody_name, derive_used
+    return patterns, key_root, base_melody_name, base_meta, derive_used
 def apply_end_slowdown_to_pattern(pattern, rng: random.Random):
     slow_tempo = rng.choice([0x64, 0x5A, 0x50])  # 100 / 90 / 80 BPM
     for row in range(64):
@@ -1235,6 +1384,7 @@ class SongData:
     seed: int
     key_root: str
     base_melody: str
+    base_melody_meta: dict[str, str]
     patterns: list
     order_original: list[int]
     order: list[int]
@@ -1273,6 +1423,15 @@ def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
     lines.append(f"title: {song.title_txt}")
     lines.append(f"key_root: {song.key_root}")
     lines.append(f"base_melody: {song.base_melody}")
+    if getattr(song, "base_melody_meta", None):
+        try:
+            if song.base_melody_meta:
+                lines.append("base_melody_meta:")
+                for k in sorted(song.base_melody_meta.keys()):
+                    lines.append(f"  {k}: {song.base_melody_meta[k]}")
+                lines.append("")
+        except Exception:
+            pass
     lines.append(f"speed: {song.speed}")
     lines.append(f"tempo: {song.tempo}")
     lines.append(f"slowdown_enabled: {bool(song.slowdown_enabled)}")
@@ -1351,7 +1510,7 @@ def generate_song(
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
-    patterns, key_root, base_melody, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode)
+    patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode)
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
@@ -1411,6 +1570,7 @@ def generate_song(
         seed=int(seed),
         key_root=key_root,
         base_melody=base_melody,
+        base_melody_meta=dict(base_melody_meta or {}),
         patterns=patterns,
         order_original=order_original,
         order=order_for_write,
@@ -2172,7 +2332,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.6.2)")
+    root.title("ProTracker MOD Choral Generator (v1.6.3)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -2214,6 +2374,55 @@ def run_gui():
     # --- left controls ---
     def pt_label(parent, text_):
         return ttk.Label(parent, text=text_, style="PT.TLabel")
+
+    def _open_folder(path: Path):
+        p = Path(path).resolve()
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(p))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(p)])
+            else:
+                subprocess.Popen(["xdg-open", str(p)])
+        except Exception as e:
+            try:
+                messagebox.showerror("Open folder", str(e))
+            except Exception:
+                pass
+
+    def _open_output_folder():
+        _open_folder(Path("mods_out"))
+
+    def _open_plugin_folder():
+        try:
+            _open_folder(_PLUGIN_ROOT)
+        except Exception:
+            _open_folder(_default_plugin_root())
+
+    def _refresh_plugins():
+        try:
+            reload_melody_plugins()
+        except Exception:
+            pass
+        try:
+            melody_combo.configure(values=get_melody_choices())
+        except Exception:
+            pass
+        # keep current selection if still available
+        try:
+            cur = melody_var.get()
+            if cur not in get_melody_choices():
+                melody_var.set("Random")
+        except Exception:
+            pass
+        try:
+            log("Plugin list refreshed.")
+        except Exception:
+            pass
 
     pt_label(left, "PATTERN ORDER").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
 
@@ -2287,6 +2496,14 @@ def run_gui():
     play_btn.grid(row=0, column=1, sticky="we", padx=(0, 6))
     stop_btn.grid(row=0, column=2, sticky="we")
 
+    open_out_btn = ttk.Button(btn_frame, text="OPEN OUTPUT", style="PT.TButton", command=_open_output_folder)
+    open_plg_btn = ttk.Button(btn_frame, text="OPEN PLUGINS", style="PT.TButton", command=_open_plugin_folder)
+    refresh_plg_btn = ttk.Button(btn_frame, text="REFRESH", style="PT.TButton", command=_refresh_plugins)
+
+    open_out_btn.grid(row=1, column=0, sticky="we", padx=(0, 6), pady=(6, 0))
+    open_plg_btn.grid(row=1, column=1, sticky="we", padx=(0, 6), pady=(6, 0))
+    refresh_plg_btn.grid(row=1, column=2, sticky="we", pady=(6, 0))
+
     # initial states
     _dummy = None
     try:
@@ -2346,7 +2563,8 @@ def run_gui():
     info_bar = tk.Frame(right, bg="#8f8f8f")
     info_bar.pack(fill="both", expand=True, padx=10, pady=(0, 10))
     info_bar.columnconfigure(0, weight=1)
-    info_bar.rowconfigure(1, weight=1)
+    info_bar.rowconfigure(1, weight=2)
+    info_bar.rowconfigure(3, weight=3)
 
     # Render / playback status belongs next to the log output (right side).
     render_var = tk.StringVar(value="")
@@ -2364,6 +2582,63 @@ def run_gui():
     info_txt = tk.Text(info_bar, height=7, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
     info_txt.grid(row=1, column=0, sticky="nsew")
     info_txt.insert("end", "Generate a song, then hit PLAY.\n")
+    # --- pattern preview (scrollable tracker grid) ---
+    patt_header = tk.Frame(info_bar, bg="#8f8f8f")
+    patt_header.grid(row=2, column=0, sticky="we", pady=(10, 2))
+    patt_title = tk.Label(patt_header, text="PATTERN PREVIEW", bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
+    patt_title.pack(side="left")
+
+    patt_sel_var = tk.StringVar(value="0")
+    patt_combo = ttk.Combobox(patt_header, textvariable=patt_sel_var, values=["0"], width=6, style="PT.TCombobox", state="readonly")
+    patt_combo.pack(side="left", padx=(12, 0))
+
+    patt_frame = tk.Frame(info_bar, bg="#8f8f8f")
+    patt_frame.grid(row=3, column=0, sticky="nsew")
+    patt_frame.columnconfigure(0, weight=1)
+    patt_frame.rowconfigure(0, weight=1)
+
+    patt_txt = tk.Text(patt_frame, height=10, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2, wrap="none")
+    patt_txt.grid(row=0, column=0, sticky="nsew")
+    patt_y = tk.Scrollbar(patt_frame, orient="vertical", command=patt_txt.yview)
+    patt_y.grid(row=0, column=1, sticky="ns")
+    patt_x = tk.Scrollbar(patt_frame, orient="horizontal", command=patt_txt.xview)
+    patt_x.grid(row=1, column=0, sticky="we")
+    patt_txt.configure(yscrollcommand=patt_y.set, xscrollcommand=patt_x.set)
+
+    def _pattern_grid_text(song: SongData, p_idx: int) -> str:
+        p_idx = max(0, min(int(p_idx), len(song.patterns) - 1))
+        pat = song.patterns[p_idx]
+        lines = []
+        lines.append(f"PATTERN {p_idx}")
+        lines.append("row | CH1            | CH2            | CH3            | CH4")
+        lines.append("----+----------------+----------------+----------------+----------------")
+        for r in range(64):
+            c0 = _cell_to_text(pat[r][0])
+            c1 = _cell_to_text(pat[r][1])
+            c2 = _cell_to_text(pat[r][2])
+            c3 = _cell_to_text(pat[r][3])
+            lines.append(f"{r:02d}  | {c0:<14} | {c1:<14} | {c2:<14} | {c3:<14}")
+        return "\n".join(lines) + "\n"
+
+    def update_pattern_preview(_evt=None):
+        try:
+            patt_txt.config(state="normal")
+            patt_txt.delete("1.0", "end")
+            if last_song is None:
+                patt_txt.insert("end", "(no song yet)\n")
+            else:
+                try:
+                    idx = int(patt_sel_var.get().strip())
+                except Exception:
+                    idx = 0
+                patt_txt.insert("end", _pattern_grid_text(last_song, idx))
+            patt_txt.config(state="disabled")
+        except Exception:
+            pass
+
+    patt_combo.bind("<<ComboboxSelected>>", update_pattern_preview)
+    update_pattern_preview()
+
     info_txt.config(state="disabled")
 
     # analyzer update loop
@@ -2538,8 +2813,18 @@ def run_gui():
             vib_txt = "OFF" if getattr(song, "vibrato_disabled", False) else "ON"
             log(f"Generated: {path}")
             log(f"Melody: {song.base_melody}")
+            meta_disp = get_plugin_metadata_display(song.base_melody)
+            if meta_disp:
+                log(f"Melody meta: {meta_disp}")
             log(f"Derive: {derive_txt} | Vibrato: {vib_txt}")
             log(f"Instruments: {', '.join(song.instrument_kinds)}")
+
+            try:
+                patt_combo.configure(values=[str(i) for i in range(len(song.patterns))])
+                patt_sel_var.set("0")
+                update_pattern_preview()
+            except Exception:
+                pass
 
             # Optional: write sidecar parameters immediately after generation.
             try:
