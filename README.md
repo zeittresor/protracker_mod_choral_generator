@@ -7,8 +7,18 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit e8055ea (latest / 05.02.2026 v1.6.2):</b></i>
 
-<i><b>New in Commit bab5bc3 (latest / 03.02.2026 v1.6.2):</b></i>
+- Pattern Preview added
+- Metadata and Info Text option added for Melody Plugins
+- Buttons to open the Plugin and Output folders (useful for the next Windows executable release)
+- Button added to refresh the Melody Plugin listing (for example if you add melody plugins while the app is still running)
+- Bugfixes (Pure Random Melody and some other stuff)
+
+<img width="1043" height="712" alt="v163" src="https://github.com/user-attachments/assets/3e67d973-f817-42d0-81fe-19d5e29864ad" />
+
+
+<i><b>New in Commit bab5bc3 (03.02.2026 v1.6.2):</b></i>
 
 - Plugin Library added (you can add now TXT and/or MID/MIDI Files for own base melodies
 - Bugfixes and Improvements added
@@ -16,7 +26,6 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <img width="1044" height="714" alt="v162" src="https://github.com/user-attachments/assets/2544a37b-1825-4df6-9093-ca51e0999c03" />
 
 https://github.com/user-attachments/assets/83a63deb-0982-46e5-91ad-fbc8d5eadbab
-
 
 
 <i><b>New in Commit d9dd7f1 (02.02.2026 v1.5.1):</b></i>
