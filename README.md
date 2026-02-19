@@ -13,6 +13,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Added Instuments
 - Bug fixes / improovments
 
+<img width="1042" height="709" alt="165" src="https://github.com/user-attachments/assets/7a35db1b-4da7-4da6-b048-55d95b14f53c" />
+
 
 <i><b>New in Commit e8055ea (05.02.2026 v1.6.3):</b></i>
 
