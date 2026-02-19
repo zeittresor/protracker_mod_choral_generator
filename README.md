@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit (latest / 19.02.2026 v1.6.5):</b></i>
+<i><b>New in Commit 88944e6 (latest / 19.02.2026 v1.6.5):</b></i>
 
 - Feature added to use a generated song as a synthetic base for a new song
 - Improoved Melody generation
