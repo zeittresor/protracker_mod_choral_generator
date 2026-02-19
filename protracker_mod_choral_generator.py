@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.6.3)
+# ProTracker MOD Choral Generator (v1.6.4)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -37,12 +37,24 @@ CHROMATIC_SET = set(CHROMATIC)
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
-DEFAULT_ORDER_STR = "0, 1, 2, 3, 2, 4, 1, 4, 2, 5"
+DEFAULT_ORDER_STR = "0, 1, 6, 2, 7, 3, 8, 4, 9, 5"
 ORDER_PRESETS = [
+    # legacy / compact
+    "0, 1, 2, 3, 2, 4, 5",
+    "0, 1, 2, 3, 2, 4, 1, 4, 2, 5",
     "5, 5, 1, 5, 0, 2, 3, 4, 2, 5, 0",
     "5, 0, 1, 5, 2, 3, 1, 4, 2, 5, 0",
-    "0, 1, 2, 3, 2, 4, 1, 4, 2, 5",
-    "0, 1, 2, 3, 2, 4, 5",
+
+    # new presets for patterns 0..9
+    "0, 1, 6, 2, 7, 3, 8, 4, 9, 5",
+    "0, 6, 1, 7, 2, 8, 4, 9, 5",
+    "6, 0, 1, 7, 2, 4, 8, 9, 5",
+    "0, 2, 6, 2, 7, 4, 8, 4, 9, 5",
+    "0, 1, 2, 6, 7, 2, 8, 9, 5",
+    "0, 3, 6, 1, 7, 2, 8, 4, 9, 5",
+    "0, 6, 6, 1, 7, 7, 2, 8, 4, 9, 5",
+    "0, 1, 2, 3, 6, 7, 8, 9, 5",
+    "6, 1, 7, 2, 8, 4, 9, 5",
 ]
 
 
@@ -692,12 +704,20 @@ INSTRUMENT_CHOICES = [
     "Sax",
     "Synth Pad",
     "Violin",
+    "Strings",
+    "Choir Aah",
     "Tuba",
+    "French Horn",
+    "Trumpet",
     "Banjo",
     "Panflute",
     "Acoustic Guitar",
     "Flamenco Guitar",
+    "Harp",
     "Organ",
+    "Electric Piano",
+    "Celesta",
+    "Bell",
     "Flute",
     "Oboe",
 ]
@@ -805,7 +825,7 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
 
     detune = rng.uniform(0.9990, 1.0015)
     vib_rate = rng.uniform(4.5, 6.2)
-    vib_amt = rng.uniform(0.0, 0.0030) if kind in ("Violin", "Synth Pad", "Panflute", "Flute") else rng.uniform(0.0, 0.0015)
+    vib_amt = rng.uniform(0.0, 0.0030) if kind in ("Violin", "Strings", "Synth Pad", "Choir Aah", "Panflute", "Flute") else rng.uniform(0.0, 0.0015)
 
     if kind == "Organ":
         vib_amt = 0.0
@@ -814,7 +834,7 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         vib_amt = 0.0
 
     # Envelope choices (kept conservative so pitch feels stable)
-    if kind in ("Synth Pad", "Violin", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ"):
+    if kind in ("Synth Pad", "Violin", "Strings", "Choir Aah", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ", "French Horn", "Trumpet"):
         attack = int(sr * rng.uniform(0.012, 0.040))
         decay = rng.uniform(0.18, 0.55)
     elif kind == "Tuba":
@@ -894,6 +914,48 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         noise_amt = 0.020
         drive = 1.28
         lp_alpha = 0.18
+
+    elif kind == "Strings":
+        partials = [(1, 1.0), (2, 0.55), (3, 0.40), (4, 0.28), (5, 0.20), (6, 0.14)]
+        noise_amt = 0.010
+        drive = 1.22
+        lp_alpha = 0.18
+    elif kind == "Choir Aah":
+        partials = [(1, 1.0), (2, 0.30), (3, 0.22), (4, 0.16), (5, 0.11), (6, 0.08)]
+        noise_amt = 0.020
+        drive = 1.12
+        lp_alpha = 0.20
+    elif kind == "French Horn":
+        partials = [(1, 1.0), (2, 0.38), (3, 0.28), (4, 0.18), (5, 0.12)]
+        noise_amt = 0.010
+        drive = 1.22
+        lp_alpha = 0.14
+    elif kind == "Trumpet":
+        partials = [(1, 1.0), (2, 0.32), (3, 0.30), (4, 0.22), (5, 0.16), (6, 0.10)]
+        noise_amt = 0.018
+        drive = 1.40
+        lp_alpha = 0.20
+    elif kind == "Harp":
+        partials = [(1, 1.0), (2, 0.72), (3, 0.50), (4, 0.34), (5, 0.24), (6, 0.18), (7, 0.12)]
+        noise_amt = 0.012
+        drive = 1.28
+        lp_alpha = 0.30
+    elif kind == "Electric Piano":
+        partials = [(1, 1.0), (2, 0.48), (3, 0.30), (4, 0.18), (5, 0.12)]
+        noise_amt = 0.006
+        drive = 1.18
+        lp_alpha = 0.26
+    elif kind == "Celesta":
+        partials = [(1, 1.0), (2, 0.22), (3, 0.10), (4, 0.06)]
+        noise_amt = 0.002
+        drive = 1.06
+        lp_alpha = 0.40
+    elif kind == "Bell":
+        partials = [(1, 1.0), (2, 0.28), (3, 0.12), (4, 0.07)]
+        noise_amt = 0.001
+        drive = 1.04
+        lp_alpha = 0.45
+
 
     buf = [0.0] * length
     lp_state = 0.0
@@ -1070,22 +1132,28 @@ def _mutate_events(
     scale_up: list[str],
     mode: str,
 ) -> list[tuple[str | None, int]]:
-    out: list[tuple[str | None, int]] = [(n, d) for (n, d) in events]
+    """Mutate a bar's (note,dur) events.
+
+    Near/far derivation uses these modes to add variation while staying in-key.
+    """
+    out: list[tuple[str | None, int]] = [(n, int(d)) for (n, d) in events]
 
     def _nearest_in_scale(note: str, step: int) -> str:
         cand = note_shift(note, step)
         if cand in scale_up:
             return cand
-        for s in (step - 1, step + 1, -step):
+        for s in (step - 1, step + 1, -step, 0):
             cc = note_shift(note, s)
             if cc in scale_up:
                 return cc
         return note
 
-    if mode == 'base':
+    m = (mode or 'base').strip().lower()
+
+    if m == 'base':
         return out
 
-    if mode == 'transpose_up':
+    if m == 'transpose_up':
         out2: list[tuple[str | None, int]] = []
         for n, d in out:
             if n is None:
@@ -1094,7 +1162,20 @@ def _mutate_events(
                 out2.append((_nearest_in_scale(n, rng.choice([1, 2])), d))
         return out2
 
-    if mode == 'answer':
+    if m == 'lift':
+        # octave lift where possible
+        out2: list[tuple[str | None, int]] = []
+        for n, d in out:
+            if n is None:
+                out2.append((None, d))
+            else:
+                nn = note_shift(n, 12)
+                if nn not in CHROMATIC_SET:
+                    nn = _nearest_in_scale(n, rng.choice([1, 2]))
+                out2.append((nn if nn in CHROMATIC_SET else n, d))
+        return out2
+
+    if m == 'answer':
         out2 = []
         for i, (n, d) in enumerate(out):
             if n is None:
@@ -1106,7 +1187,7 @@ def _mutate_events(
                 out2.append((n, d))
         return out2
 
-    if mode == 'cadence':
+    if m == 'cadence':
         out2 = []
         for i, (n, d) in enumerate(out):
             if i == len(out) - 1:
@@ -1117,12 +1198,12 @@ def _mutate_events(
                 out2.append((n, d))
         return out2
 
-    if mode == 'ornament':
+    if m == 'ornament':
         out2: list[tuple[str | None, int]] = []
         for n, d in out:
             if n is not None and d >= 4 and rng.random() < 0.55:
                 d1 = 2
-                d2 = d - 2
+                d2 = max(1, d - 2)
                 pn = _nearest_in_scale(n, rng.choice([-2, -1, 1, 2]))
                 out2.append((n, d1))
                 out2.append((pn, d2))
@@ -1130,8 +1211,62 @@ def _mutate_events(
                 out2.append((n, d))
         return out2
 
-    return out
+    if m == 'drive':
+        # Add a little "push" by splitting longer notes and adding neighbor motion.
+        out2: list[tuple[str | None, int]] = []
+        for n, d in out:
+            if n is None or d <= 2:
+                out2.append((n, d))
+                continue
+            if d >= 4 and rng.random() < 0.75:
+                # e.g. 2 + 2 (+ remainder)
+                nn = _nearest_in_scale(n, rng.choice([-1, 1, 2, -2]))
+                out2.append((n, 2))
+                out2.append((nn, 2))
+                rem = d - 4
+                if rem > 0:
+                    out2.append((n, rem))
+            else:
+                out2.append((n, d))
+        return out2
 
+    if m == 'arp':
+        # Convert some sustained notes into small repeating figures.
+        out2: list[tuple[str | None, int]] = []
+        for n, d in out:
+            if n is None or d <= 2:
+                out2.append((n, d))
+                continue
+            if d >= 4 and rng.random() < 0.85:
+                step = rng.choice([-2, -1, 1, 2])
+                nn = _nearest_in_scale(n, step)
+                seg = 2
+                reps = max(1, d // seg)
+                for i in range(reps):
+                    out2.append((n if (i % 2 == 0) else nn, seg))
+                tail = d - reps * seg
+                if tail > 0:
+                    out2.append((n, tail))
+            else:
+                out2.append((n, d))
+        return out2
+
+    if m == 'turn':
+        # Add a short pickup into some notes.
+        out2: list[tuple[str | None, int]] = []
+        for n, d in out:
+            if n is None or d <= 2:
+                out2.append((n, d))
+                continue
+            if rng.random() < 0.65:
+                pn = _nearest_in_scale(n, rng.choice([-1, -2]))
+                out2.append((pn, 1))
+                out2.append((n, d - 1))
+            else:
+                out2.append((n, d))
+        return out2
+
+    return out
 
 def _pick_base_melody(
     rng: random.Random,
@@ -1192,7 +1327,7 @@ def make_patterns(
     base_melody_name, base_tpl, base_meta = _pick_base_melody(rng, melody_name)
 
     if base_tpl is None:
-        # Pure algorithmic base melody (not shipped as a plugin by design)
+        # Pure algorithmic base melody
         base_prog = [0, 3, 4, 0]
         base_bars = []
         for deg in base_prog:
@@ -1203,7 +1338,8 @@ def make_patterns(
     else:
         base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
 
-    for _ in range(6):
+    N_PAT = 10
+    for _ in range(N_PAT):
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
         patterns.append(pat)
 
@@ -1215,33 +1351,59 @@ def make_patterns(
         if 0 <= row < 64:
             patterns[p][row][ch] = (note, samp, effect, param)
 
+    # 10 progressions (degree in major scale) - designed to stay "choral" but offer more variety
     progs = [
-        [0, 3, 4, 0],
-        [0, 4, 5, 3],
-        [3, 0, 4, 0],
-        [0, 3, 0, 4],
-        [5, 3, 4, 0],
-        [0, 2, 3, 4],
+        [0, 3, 4, 0],  # 0: base
+        [0, 4, 5, 3],  # 1: ornament
+        [3, 0, 4, 0],  # 2: answer
+        [0, 3, 0, 4],  # 3: pad/hold
+        [5, 3, 4, 0],  # 4: answer/sequence
+        [0, 2, 3, 4],  # 5: cadence-ish
+        [0, 3, 5, 4],  # 6: drive (pushes to V)
+        [0, 2, 5, 3],  # 7: arp / motion
+        [4, 3, 2, 0],  # 8: lift / descending tension-release
+        [0, 5, 3, 4],  # 9: turnaround
     ]
 
     # Derivation style: Near = more recognizable, Far = motif-only (more variation)
     dm = (derive_mode or 'Random').strip().lower()
     if dm in ('random', 'auto'):
         dm = rng.choice(['near', 'far'])
+
     if dm.startswith('n') or dm.startswith('c'):
-        mode_for_pattern = {0: 'base', 1: 'ornament', 2: 'base', 3: 'pad', 4: 'answer', 5: 'cadence'}
+        mode_for_pattern = {
+            0: 'base',
+            1: 'ornament',
+            2: 'base',
+            3: 'pad',
+            4: 'answer',
+            5: 'cadence',
+            6: 'drive',
+            7: 'arp',
+            8: 'lift',
+            9: 'turn',
+        }
     else:
-        mode_for_pattern = {0: 'base', 1: 'ornament', 2: 'transpose_up', 3: 'pad', 4: 'answer', 5: 'cadence'}
+        mode_for_pattern = {
+            0: 'base',
+            1: 'ornament',
+            2: 'transpose_up',
+            3: 'pad',
+            4: 'answer',
+            5: 'cadence',
+            6: 'drive',
+            7: 'arp',
+            8: 'lift',
+            9: 'turn',
+        }
 
-    derive_used = "Near" if (dm.startswith("n") or dm.startswith("c")) else "Far"
+    derive_used = "Near" if (dm.startswith('n') or dm.startswith('c')) else "Far"
 
-    for p_idx in range(6):
+    for p_idx in range(N_PAT):
         prog = progs[p_idx]
         for bar, deg in enumerate(prog):
             r0 = bar * 16
             start_row = r0
-            # Allow notes to start on row 0. Speed/tempo effects are merged into
-            # the same row/cell (ProTracker supports note+effect together).
 
             if p_idx == 3:
                 bar_events = []
@@ -1269,6 +1431,7 @@ def make_patterns(
             bass = note_shift(root, -12)
             top = fifth
 
+            # basic harmony bed
             set_cell(p_idx, start_row, 1, top)
             set_cell(p_idx, start_row, 2, bass)
             set_cell(p_idx, start_row, 3, third)
@@ -1277,6 +1440,7 @@ def make_patterns(
                 set_cell(p_idx, start_row + 8, 1, top)
                 set_cell(p_idx, start_row + 8, 2, bass)
 
+            # pad pattern
             if p_idx == 3:
                 if bar == 0:
                     hold = rng.choice([third, fifth, note_shift(root, 12)])
@@ -1301,6 +1465,7 @@ def make_patterns(
                     set_cell(p_idx, start_row, 0, a)
                     set_cell(p_idx, start_row + 8, 0, b)
             else:
+                # melody
                 if p_idx == 0 and bar == 0 and bar_events:
                     n_last, d_last = bar_events[-1]
                     if d_last > 1:
@@ -1315,6 +1480,38 @@ def make_patterns(
                         set_cell(p_idx, r, 0, note)
                     r += max(1, int(dur))
 
+            # extra motion layers for the new patterns
+            if p_idx == 6:
+                # rhythmic "walking" bass + chord stabs
+                bass2 = note_shift(third, -12)
+                bass5 = note_shift(fifth, -12)
+                seq = [bass, bass5, bass2, bass5]
+                for i in range(0, 16, 4):
+                    set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
+                # stabs on offbeats
+                stab = chord_up[1]  # third up
+                for i in (2, 6, 10, 14):
+                    set_cell(p_idx, start_row + i, 1, stab)
+
+            if p_idx == 7:
+                # arpeggio shimmer on CH4
+                arp = [chord_up[0], chord_up[1], chord_up[2], chord_up[1]]
+                for i in range(0, 16, 2):
+                    set_cell(p_idx, start_row + i, 3, arp[(i // 2) % len(arp)])
+
+            if p_idx == 8:
+                # lift: add extra top octave support
+                hi = note_shift(chord_up[2], 12)
+                if hi in CHROMATIC_SET and rng.random() < 0.7:
+                    set_cell(p_idx, start_row + 8, 1, hi)
+
+            if p_idx == 9:
+                # turnaround: a short answer in CH4
+                tones = [chord_up[2], chord_up[1], chord_up[0], chord_up[1]]
+                for i in range(8, 16, 2):
+                    set_cell(p_idx, start_row + i, 3, tones[((i - 8) // 2) % len(tones)])
+
+            # keep legacy arpeggio feel in some patterns
             if p_idx in (2, 4) and rng.random() < 0.75:
                 tones = [third, root, fifth, root]
                 tones = [note_shift(t, 12) if t.endswith('2') else t for t in tones]
@@ -1322,8 +1519,7 @@ def make_patterns(
                 for i in range(0, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
 
-    # Ensure the selected speed/tempo is present in EVERY pattern (important when
-    # pattern orders start with something other than 0).
+    # Ensure the selected speed/tempo is present in EVERY pattern.
     spd = max(1, min(31, int(speed)))
     bpm = max(32, min(255, int(tempo)))
     for pat in patterns:
@@ -1333,6 +1529,7 @@ def make_patterns(
         pat[0][1] = (n, s, 0x0F, bpm)
 
     return patterns, key_root, base_melody_name, base_meta, derive_used
+
 def apply_end_slowdown_to_pattern(pattern, rng: random.Random):
     slow_tempo = rng.choice([0x64, 0x5A, 0x50])  # 100 / 90 / 80 BPM
     for row in range(64):
@@ -1370,7 +1567,7 @@ def parse_order_string(order_str: str) -> list[int]:
     return order
 
 
-def validate_order(order: list[int], n_patterns: int = 6) -> None:
+def validate_order(order: list[int], n_patterns: int = 10) -> None:
     if len(order) > 128:
         raise ValueError("Order is too long (max 128 positions).")
     bad = [x for x in order if x < 0 or x >= n_patterns]
@@ -2332,7 +2529,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.6.3)")
+    root.title("ProTracker MOD Choral Generator (v1.6.4)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -2416,7 +2613,7 @@ def run_gui():
         try:
             cur = melody_var.get()
             if cur not in get_melody_choices():
-                melody_var.set("Random")
+                melody_var.set("Pure Random")
         except Exception:
             pass
         try:
@@ -2431,7 +2628,7 @@ def run_gui():
     order_combo.grid(row=1, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
 
     pt_label(left, "BASE MELODY").grid(row=2, column=0, columnspan=2, sticky="w", padx=8)
-    melody_var = tk.StringVar(value="Random")
+    melody_var = tk.StringVar(value="Pure Random")
     melody_combo = ttk.Combobox(left, textvariable=melody_var, values=MELODY_CHOICES, width=32, style="PT.TCombobox", state="readonly")
     melody_combo.grid(row=3, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
 
@@ -2781,7 +2978,7 @@ def run_gui():
                     pass
             
             order_list = parse_order_string(order_var.get())
-            validate_order(order_list, n_patterns=6)
+            validate_order(order_list, n_patterns=10)
 
             spd = parse_int_field("Speed", speed_var.get(), 1, 31)
             bpm = parse_int_field("Tempo", tempo_var.get(), 32, 255)
