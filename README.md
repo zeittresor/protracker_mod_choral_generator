@@ -11,6 +11,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 - Added Patterns
 - Added Instuments
+- Added Base Key (optional)
 - Bug fixes / improovments
 
 <img width="1042" height="709" alt="165" src="https://github.com/user-attachments/assets/7a35db1b-4da7-4da6-b048-55d95b14f53c" />
