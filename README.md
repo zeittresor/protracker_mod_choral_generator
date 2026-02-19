@@ -9,7 +9,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <i><b>New in Commit 88944e6 (latest / 19.02.2026 v1.6.6):</b></i>
 
-- Feature added to use a generated song as a synthetic base for a new song
+- Feature added to use a generated song as a synthetic base for new songs
 - Improoved Melody generation
 
 <img width="1045" height="714" alt="166" src="https://github.com/user-attachments/assets/1d43b087-8afe-488d-bf33-fff2a43afdd6" />
