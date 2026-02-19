@@ -7,7 +7,14 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit e8055ea (latest / 05.02.2026 v1.6.3):</b></i>
+<i><b>New in Commit afbff2a (latest / 19.02.2026 v1.6.5):</b></i>
+
+- Added Patterns
+- Added Instuments
+- Bug fixes / improovments
+
+
+<i><b>New in Commit e8055ea (05.02.2026 v1.6.3):</b></i>
 
 - Pattern Preview added
 - Metadata and Info Text option added for Melody Plugins
