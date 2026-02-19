@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.6.5)
+# ProTracker MOD Choral Generator (v1.6.6)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import os
 import random
 import re
 import struct
+import shutil
 import subprocess
 import sys
 import threading
@@ -465,32 +466,31 @@ def _parse_plugin_txt(path: Path) -> tuple[str, list[list[tuple[int | None, int,
             continue
 
         parts = re.split(r"\s+", s)
-        if len(parts) >= 3 and re.fullmatch(r"-?\d+|R", parts[0], re.I):
-            # DEG OCT DUR
-            deg_tok = parts[0]
+
+        # DEG OCT DUR  (strict; avoids mis-parsing tracker grids / parameter dumps)
+        if len(parts) >= 3 and re.fullmatch(r"[0-6]|R", parts[0], re.I):
+            deg_tok = parts[0].upper()
             try:
+                octv = int(parts[1])
                 dur = int(parts[2])
             except Exception:
-                dur = 4
-
-            if deg_tok.upper() == "R":
-                events.append((None, max(1, dur)))
+                # not an actual DEG OCT DUR line
+                pass
             else:
-                deg = int(deg_tok)
-                deg = max(0, min(6, deg))
-                # convert degree+octv to midi note in C major near C4
-                try:
-                    octv = int(parts[1])
-                except Exception:
-                    octv = 0
-                base = 60
-                midi = base + octv * 12 + C_MAJOR_PCS[deg]
-                events.append((midi, max(1, dur)))
-            continue
+                if deg_tok == "R":
+                    events.append((None, max(1, dur)))
+                else:
+                    deg = int(deg_tok)
+                    base = 60
+                    midi = base + octv * 12 + C_MAJOR_PCS[deg]
+                    events.append((midi, max(1, dur)))
+                continue
 
-        if len(parts) >= 2:
-            # NOTE DUR
+        # NOTE DUR  (only if it looks like a note token)
+        if len(parts) >= 2 and re.match(r"^[A-Ga-g]", parts[0]):
             midi = _parse_note_token_to_midi(parts[0])
+            if midi is None:
+                continue
             try:
                 dur = int(parts[1])
             except Exception:
@@ -1758,6 +1758,128 @@ def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
     return f"{n} {s} {e}"
 
 
+
+
+# -----------------------------
+# Melody Plugin export (from generated songs)
+# -----------------------------
+
+_MIDI_TO_PT_NOTE: dict[int, str] = {}
+try:
+    # Build a small reverse map for the ProTracker note range we use.
+    for _n in CHROMATIC:
+        _m = _parse_note_token_to_midi(_n)
+        if _m is not None:
+            _MIDI_TO_PT_NOTE[int(_m)] = _n
+except Exception:
+    _MIDI_TO_PT_NOTE = {}
+
+
+def _extract_melody_events_from_song(song: SongData, channel: int = 0) -> list[tuple[int | None, int]]:
+    """Extract a monophonic melody event stream from a rendered song.
+
+    We walk the final order and read note changes on the given channel, collapsing
+    consecutive equal notes/rests. Output is (midi_note|None, dur_rows).
+    """
+    events: list[tuple[int | None, int]] = []
+    last: int | None = None
+    dur = 0
+    try:
+        order = list(song.order) if getattr(song, 'order', None) else list(song.order_original)
+    except Exception:
+        order = []
+
+    for p_idx in order:
+        if not isinstance(p_idx, int):
+            continue
+        if p_idx < 0 or p_idx >= len(song.patterns):
+            continue
+        pat = song.patterns[p_idx]
+        for r in range(64):
+            try:
+                note = pat[r][channel][0]
+            except Exception:
+                note = None
+            if note is None or note == "---":
+                cur = None
+            else:
+                cur = _parse_note_token_to_midi(str(note))
+            if cur == last:
+                dur += 1
+            else:
+                if dur > 0:
+                    events.append((last, dur))
+                last = cur
+                dur = 1
+
+    if dur > 0:
+        events.append((last, dur))
+
+    # Split very long runs for readability.
+    out: list[tuple[int | None, int]] = []
+    for n, d in events:
+        d = max(1, int(d))
+        while d > 16:
+            out.append((n, 16))
+            d -= 16
+        out.append((n, d))
+
+    return out or [(60, 4), (62, 4), (64, 4), (65, 4)]
+
+
+def plugin_export_text_from_song(mod_path: Path, song: SongData) -> str:
+    """Return a melody-plugin compatible text block extracted from a generated song.
+
+    This is designed so users can drop a saved parameter .txt into melody_plugins/<folder>/
+    and the app can treat it as a base melody plugin.
+    """
+    name = (getattr(song, 'title_txt', '') or mod_path.stem).strip() or mod_path.stem
+
+    # derive basic metadata hints
+    mode = 'major'
+    try:
+        if getattr(song, 'base_melody_meta', None):
+            mode = str(song.base_melody_meta.get('mode', mode) or mode).strip().lower()
+    except Exception:
+        pass
+    if mode not in ('major', 'minor'):
+        mode = 'minor' if 'minor' in mode or 'moll' in mode else 'major'
+
+    tempo = int(getattr(song, 'tempo', DEFAULT_TEMPO) or DEFAULT_TEMPO)
+    tmin = max(40, tempo - 20)
+    tmax = min(255, tempo + 20)
+
+    key_root = str(getattr(song, 'key_root', '') or '').strip() or 'C-2'
+    key_hi = key_root
+    try:
+        km = _parse_note_token_to_midi(key_root)
+        if km is not None and _MIDI_TO_PT_NOTE:
+            # perfect fifth above (approx) for a friendly key range hint
+            key_hi = _MIDI_TO_PT_NOTE.get(int(km) + 7, key_root)
+    except Exception:
+        key_hi = key_root
+
+    events = _extract_melody_events_from_song(song, channel=0)
+    bars = _events_to_4bars_degree_template(events)
+
+    lines: list[str] = []
+    lines.append('name: ' + name)
+    lines.append(f'mode: {mode}')
+    lines.append(f'tempo_hint: {tmin}-{tmax}')
+    lines.append(f'preferred_key_range: {key_root}..{key_hi}')
+    lines.append(f'source_mod: {mod_path.name}')
+    lines.append(f'seed: {getattr(song, "seed", "")}')
+    lines.append('# format: DEG OCT DUR  (DEG=0..6, OCT=-2..2, DUR=rows; use R for rest)')
+    for bi, bar in enumerate(bars, start=1):
+        lines.append(f'# bar {bi}')
+        for deg, octv, dur in bar:
+            if deg is None:
+                lines.append(f'R 0 {int(dur)}')
+            else:
+                lines.append(f'{int(deg)} {int(octv)} {int(dur)}')
+        lines.append('')
+
+    return '\n'.join(lines).rstrip() + '\n'
 def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
     """Write a structured .txt sidecar next to the MOD.
 
@@ -1814,6 +1936,19 @@ def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
             c2 = _cell_to_text(pat[r][2])
             c3 = _cell_to_text(pat[r][3])
             lines.append(f"{r:02d}  | {c0:<14} | {c1:<14} | {c2:<14} | {c3:<14}")
+
+
+
+    # --- melody plugin export block ---
+    try:
+        lines.append("")
+        lines.append("# === MELODY PLUGIN EXPORT ===")
+        lines.append("# Tip: Create a new subfolder in 'melody_plugins' and drop this .txt into it.")
+        lines.append("# The app will treat it as a melody plugin (no renaming required).")
+        lines.append("")
+        lines.extend(plugin_export_text_from_song(mod_path, song).splitlines())
+    except Exception:
+        pass
 
     txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return txt_path
@@ -2685,7 +2820,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.6.5)")
+    root.title("ProTracker MOD Choral Generator (v1.6.6)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -2777,6 +2912,97 @@ def run_gui():
         except Exception:
             pass
 
+
+
+    def _add_last_as_plugin():
+        """Create a new melody plugin folder from the most recently generated song.
+
+        Strategy: we copy the saved song-parameter .txt (which includes a "MELODY PLUGIN EXPORT"
+        block), so users can also manually edit it later.
+        """
+        nonlocal last_song, last_mod_path
+        if last_song is None:
+            try:
+                log("No song yet - generate one first.")
+            except Exception:
+                pass
+            return
+
+        try:
+            plugin_root = _PLUGIN_ROOT
+        except Exception:
+            plugin_root = _default_plugin_root()
+        try:
+            plugin_root.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        # Prefer the real parameter file if it exists.
+        src_txt: Path | None = None
+        if last_mod_path is not None:
+            p = last_mod_path.with_suffix('.txt')
+            if p.exists():
+                src_txt = p
+
+        # If it doesn't exist (checkbox disabled), create a minimal plugin txt on the fly.
+        if src_txt is None:
+            try:
+                base_mod = last_mod_path or (Path('mods_out') / 'generated.mod')
+                tmp = Path('mods_out') / (base_mod.stem + '_plugin.txt')
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(plugin_export_text_from_song(base_mod, last_song), encoding='utf-8')
+                src_txt = tmp
+            except Exception as e:
+                try:
+                    log(f"Add as plugin failed: {e}")
+                except Exception:
+                    pass
+                return
+
+        # Create new folder
+        base_name = (getattr(last_song, 'title_txt', '') or (last_mod_path.stem if last_mod_path else 'generated')).strip() or 'generated'
+        slug = _slugify(base_name)
+        dest_dir = plugin_root / slug
+        i = 2
+        while dest_dir.exists():
+            dest_dir = plugin_root / f"{slug}_{i}"
+            i += 1
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+        try:
+            shutil.copyfile(str(src_txt), str(dest_dir / 'melody.txt'))
+        except Exception:
+            # fallback: plain copy
+            try:
+                (dest_dir / 'melody.txt').write_text(src_txt.read_text(encoding='utf-8', errors='ignore'), encoding='utf-8')
+            except Exception as e:
+                try:
+                    log(f"Add as plugin failed: {e}")
+                except Exception:
+                    pass
+                return
+
+        # Create/overwrite info.txt only if missing
+        try:
+            info_p = dest_dir / 'info.txt'
+            if not info_p.exists():
+                info_p.write_text(_default_plugin_info_text(base_name), encoding='utf-8')
+        except Exception:
+            pass
+
+        try:
+            log(f"Added melody plugin: {dest_dir.name}")
+        except Exception:
+            pass
+
+        try:
+            _refresh_plugins()
+        except Exception:
+            pass
+
     pt_label(left, "PATTERN ORDER").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
 
     order_var = tk.StringVar(value=DEFAULT_ORDER_STR)
@@ -2863,11 +3089,15 @@ def run_gui():
     open_plg_btn.grid(row=1, column=1, sticky="we", padx=(0, 6), pady=(6, 0))
     refresh_plg_btn.grid(row=1, column=2, sticky="we", pady=(6, 0))
 
+    add_plg_btn = ttk.Button(btn_frame, text="ADD AS PLUGIN", style="PT.TButton", command=_add_last_as_plugin)
+    add_plg_btn.grid(row=2, column=0, columnspan=3, sticky="we", pady=(6, 0))
+
     # initial states
     _dummy = None
     try:
         play_btn.state(["disabled"])
         stop_btn.state(["disabled"])
+        add_plg_btn.state(["disabled"])
     except Exception:
         pass
 
@@ -3217,6 +3447,10 @@ def run_gui():
         gen_btn.state(["!disabled"] if can_generate else ["disabled"])
         play_btn.state(["!disabled"] if can_play else ["disabled"])
         stop_btn.state(["!disabled"] if can_stop else ["disabled"])
+        try:
+            add_plg_btn.state(["!disabled"] if (last_song is not None) else ["disabled"])
+        except Exception:
+            pass
 
     def _render_preview_worker(song: SongData):
         nonlocal preview_pcm, preview_wav, preview_frames, preview_sr, preview_ch, render_error
