@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.6.4)
+# ProTracker MOD Choral Generator (v1.6.5)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -34,10 +34,45 @@ OCTAVES = [1, 2, 3]
 CHROMATIC = [f"{n}{o}" for o in OCTAVES for n in CHROMA]
 CHROMATIC_SET = set(CHROMATIC)
 
+
+def normalize_key_root(s: str | None) -> str | None:
+    """Normalize user-provided key root text to ProTracker note format (e.g. C-2, F#-2).
+
+    Accepts: C-2, C2, C#, Bb, Bb-2, etc. Returns None for random/empty.
+    """
+    if s is None:
+        return None
+    t = str(s).strip()
+    if not t or t.lower() in ("random", "auto", "none"):
+        return None
+    # allow formats like C2, C-2, C#2, Bb-2, Bb2, etc
+    m = re.match(r"^\s*([A-Ga-g])\s*([#bB]?)\s*(?:-?\s*(\d))?\s*$", t)
+    if not m:
+        return None
+    note = m.group(1).upper()
+    acc = m.group(2)
+    octv = m.group(3) or "2"
+    if acc in ("b", "B"):
+        # convert flats to sharps
+        flat_map = {"DB": "C#", "EB": "D#", "GB": "F#", "AB": "G#", "BB": "A#"}
+        key = note + "B"
+        note = flat_map.get(key, note)
+        # note may now include #
+        if len(note) == 2 and note[1] == "#":
+            pass
+    elif acc == "#":
+        note = note + "#"
+    # ProTracker note format used in this script: e.g. C-2, F#-2
+    norm = f"{note}-{octv}"
+    return norm if norm in CHROMATIC_SET else None
+
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
-DEFAULT_ORDER_STR = "0, 1, 6, 2, 7, 3, 8, 4, 9, 5"
+DEFAULT_ORDER_STR = "0, 10, 6, 11, 2, 12, 7, 13, 4, 14, 9, 15, 5"
+
+# How many base patterns are generated (0..PATTERN_COUNT-1).
+PATTERN_COUNT = 20
 ORDER_PRESETS = [
     # legacy / compact
     "0, 1, 2, 3, 2, 4, 5",
@@ -55,6 +90,17 @@ ORDER_PRESETS = [
     "0, 6, 6, 1, 7, 7, 2, 8, 4, 9, 5",
     "0, 1, 2, 3, 6, 7, 8, 9, 5",
     "6, 1, 7, 2, 8, 4, 9, 5",
+    # new presets for patterns 0..19
+    "0, 10, 6, 11, 2, 12, 7, 13, 4, 14, 9, 15, 5",
+    "0, 1, 10, 11, 6, 12, 2, 13, 8, 14, 4, 15, 9, 16, 5",
+    "10, 0, 11, 1, 12, 6, 13, 2, 14, 4, 15, 9, 5",
+    "0, 10, 12, 10, 6, 11, 13, 7, 14, 8, 15, 9, 5",
+    "0, 6, 10, 7, 11, 2, 12, 8, 13, 4, 14, 9, 15, 5",
+    "0, 10, 1, 11, 2, 12, 3, 13, 4, 14, 9, 15, 5",
+    "6, 10, 7, 11, 8, 12, 9, 13, 5",
+    "0, 2, 10, 12, 6, 7, 13, 14, 4, 15, 9, 5",
+    "0, 10, 16, 11, 17, 12, 18, 13, 19, 14, 15, 5",
+
 ]
 
 
@@ -1315,12 +1361,13 @@ def make_patterns(
     tempo: int = DEFAULT_TEMPO,
     melody_name: str | None = None,
     derive_mode: str | None = None,
+    key_root_override: str | None = None,
 ):
     NUM_CH = 4
     ROWS = 64
     patterns: list[list[list[tuple[str | None, int, int, int]]]] = []
 
-    key_root = rng.choice(['C-2', 'G-2', 'F-2', 'D-2'])
+    key_root = normalize_key_root(key_root_override) or rng.choice(['C-2', 'G-2', 'F-2', 'D-2'])
     scale = major_scale(key_root)
     scale_up = [note_shift(n, 12) for n in scale]
 
@@ -1338,7 +1385,7 @@ def make_patterns(
     else:
         base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
 
-    N_PAT = 10
+    N_PAT = PATTERN_COUNT
     for _ in range(N_PAT):
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
         patterns.append(pat)
@@ -1351,7 +1398,7 @@ def make_patterns(
         if 0 <= row < 64:
             patterns[p][row][ch] = (note, samp, effect, param)
 
-    # 10 progressions (degree in major scale) - designed to stay "choral" but offer more variety
+    # 20 progressions (degree in major scale) - designed to stay "choral" but offer more variety
     progs = [
         [0, 3, 4, 0],  # 0: base
         [0, 4, 5, 3],  # 1: ornament
@@ -1363,6 +1410,17 @@ def make_patterns(
         [0, 2, 5, 3],  # 7: arp / motion
         [4, 3, 2, 0],  # 8: lift / descending tension-release
         [0, 5, 3, 4],  # 9: turnaround
+
+        [0, 5, 3, 4],  # 10: pop-gospel (I-vi-IV-V)
+        [3, 4, 0, 0],  # 11: amen cadence (IV-V-I-I)
+        [0, 4, 5, 3],  # 12: pop lift (I-V-vi-IV)
+        [0, 1, 3, 4],  # 13: step to cadence (I-ii-IV-V)
+        [5, 3, 0, 4],  # 14: warm return (vi-IV-I-V)
+        [2, 5, 1, 4],  # 15: circle-ish (iii-vi-ii-V)
+        [0, 3, 1, 4],  # 16: gospel turn (I-IV-ii-V)
+        [0, 0, 3, 4],  # 17: breakdown (I-I-IV-V)
+        [4, 5, 3, 0],  # 18: tension-release (V-vi-IV-I)
+        [5, 4, 3, 0],  # 19: descending close (vi-V-IV-I)
     ]
 
     # Derivation style: Near = more recognizable, Far = motif-only (more variation)
@@ -1371,10 +1429,10 @@ def make_patterns(
         dm = rng.choice(['near', 'far'])
 
     if dm.startswith('n') or dm.startswith('c'):
-        mode_for_pattern = {
+                        mode_for_pattern = {
             0: 'base',
             1: 'ornament',
-            2: 'base',
+            2: 'transpose_up',
             3: 'pad',
             4: 'answer',
             5: 'cadence',
@@ -1382,6 +1440,16 @@ def make_patterns(
             7: 'arp',
             8: 'lift',
             9: 'turn',
+            10: 'drive',
+            11: 'cadence',
+            12: 'transpose_up',
+            13: 'arp',
+            14: 'answer',
+            15: 'drive',
+            16: 'turn',
+            17: 'pad',
+            18: 'lift',
+            19: 'cadence',
         }
     else:
         mode_for_pattern = {
@@ -1511,6 +1579,93 @@ def make_patterns(
                 for i in range(8, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[((i - 8) // 2) % len(tones)])
 
+            
+
+            if p_idx == 10:
+                # Pop-gospel drive: walking-ish bass + gentle offbeat stabs
+                bass2 = note_shift(third, -12)
+                bass5 = note_shift(fifth, -12)
+                seq = [bass, bass2, bass5, bass2]
+                for i in range(0, 16, 4):
+                    set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
+                stab = chord_up[2]
+                for i in (2, 6, 10, 14):
+                    set_cell(p_idx, start_row + i, 1, stab)
+
+            if p_idx == 11:
+                # Amen cadence: sustained top + small answer line
+                hi = note_shift(chord_up[2], 12)
+                if hi in CHROMATIC_SET:
+                    set_cell(p_idx, start_row, 1, hi)
+                # gentle answer in CH4
+                tones = [chord_up[1], chord_up[2], chord_up[1], chord_up[0]]
+                for i in range(8, 16, 2):
+                    set_cell(p_idx, start_row + i, 3, tones[((i - 8) // 2) % len(tones)])
+
+            if p_idx == 12:
+                # Pop lift: sync stabs + octave support
+                stab = chord_up[1]
+                for i in (4, 12):
+                    set_cell(p_idx, start_row + i, 1, stab)
+                o = note_shift(chord_up[2], 12)
+                if o in CHROMATIC_SET and rng.random() < 0.6:
+                    set_cell(p_idx, start_row + 8, 1, o)
+
+            if p_idx == 13:
+                # Step-to-cadence: arpeggio shimmer in CH4
+                arp = [chord_up[0], chord_up[1], chord_up[2], chord_up[1]]
+                for i in range(0, 16, 2):
+                    set_cell(p_idx, start_row + i, 3, arp[(i // 2) % len(arp)])
+
+            if p_idx == 14:
+                # Warm return: pedal-ish bass with chord pulses
+                set_cell(p_idx, start_row, 2, bass)
+                for i in (0, 4, 8, 12):
+                    set_cell(p_idx, start_row + i, 1, chord_up[2])
+                    set_cell(p_idx, start_row + i, 3, chord_up[1])
+
+            if p_idx == 15:
+                # Circle-ish: extra motion in bass and short top pickups
+                bass5 = note_shift(fifth, -12)
+                seq = [bass, bass5, bass, bass5]
+                for i in range(0, 16, 4):
+                    set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
+                for i in (1, 9):
+                    set_cell(p_idx, start_row + i, 1, chord_up[1])
+
+            if p_idx == 16:
+                # Gospel turn: short answering line in CH4 (call/response)
+                tones = [chord_up[2], chord_up[1], chord_up[0], chord_up[1]]
+                for i in range(0, 16, 2):
+                    if rng.random() < 0.75:
+                        set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
+
+            if p_idx == 17:
+                # Breakdown: keep it sparser (remove some offbeats)
+                if rng.random() < 0.8:
+                    # clear some harmony repeats
+                    for rr in (start_row + 8,):
+                        set_cell(p_idx, rr, 1, None, sample=0)
+                        set_cell(p_idx, rr, 3, None, sample=0)
+
+            if p_idx == 18:
+                # Climax: denser stabs (but still harmonic)
+                stab1 = chord_up[2]
+                stab2 = chord_up[1]
+                for i in range(0, 16, 2):
+                    set_cell(p_idx, start_row + i, 1, stab1 if (i % 4 == 0) else stab2)
+
+            if p_idx == 19:
+                # Descending close: descending bass line (approx) + top support
+                b0 = bass
+                b1 = note_shift(bass, -2)
+                b2 = note_shift(bass, -4)
+                b3 = note_shift(bass, -5)
+                bseq = [x if x in CHROMATIC_SET else bass for x in (b0, b1, b2, b3)]
+                for i in range(0, 16, 4):
+                    set_cell(p_idx, start_row + i, 2, bseq[(i // 4) % len(bseq)])
+                if rng.random() < 0.6:
+                    set_cell(p_idx, start_row + 8, 1, chord_up[2])
             # keep legacy arpeggio feel in some patterns
             if p_idx in (2, 4) and rng.random() < 0.75:
                 tones = [third, root, fifth, root]
@@ -1567,7 +1722,7 @@ def parse_order_string(order_str: str) -> list[int]:
     return order
 
 
-def validate_order(order: list[int], n_patterns: int = 10) -> None:
+def validate_order(order: list[int], n_patterns: int = PATTERN_COUNT) -> None:
     if len(order) > 128:
         raise ValueError("Order is too long (max 128 positions).")
     bad = [x for x in order if x < 0 or x >= n_patterns]
@@ -1686,6 +1841,7 @@ def generate_song(
     melody_name: str | None = None,
     derive_mode: str | None = "Random",
     disable_vibrato: bool = False,
+    key_root_override: str | None = None,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
@@ -1707,7 +1863,7 @@ def generate_song(
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
-    patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode)
+    patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode, key_root_override=key_root_override)
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
@@ -2529,7 +2685,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.6.4)")
+    root.title("ProTracker MOD Choral Generator (v1.6.5)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     try:
@@ -2637,35 +2793,41 @@ def run_gui():
     derive_combo = ttk.Combobox(left, textvariable=derive_var, values=["Random", "Near", "Far"], width=32, style="PT.TCombobox", state="readonly")
     derive_combo.grid(row=5, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
 
+    pt_label(left, "BASE KEY (optional)").grid(row=6, column=0, sticky="w", padx=8)
+    key_var = tk.StringVar(value="")
+    key_entry = tk.Entry(left, textvariable=key_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
+    key_entry.grid(row=6, column=1, sticky="e", padx=8, pady=2)
 
-    pt_label(left, "SPEED").grid(row=6, column=0, sticky="w", padx=8)
+
+
+    pt_label(left, "SPEED").grid(row=7, column=0, sticky="w", padx=8)
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
     speed_entry = tk.Entry(left, textvariable=speed_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    speed_entry.grid(row=6, column=1, sticky="e", padx=8, pady=2)
+    speed_entry.grid(row=7, column=1, sticky="e", padx=8, pady=2)
 
-    pt_label(left, "TEMPO").grid(row=7, column=0, sticky="w", padx=8)
+    pt_label(left, "TEMPO").grid(row=8, column=0, sticky="w", padx=8)
     tempo_var = tk.StringVar(value=str(DEFAULT_TEMPO))
     tempo_entry = tk.Entry(left, textvariable=tempo_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    tempo_entry.grid(row=7, column=1, sticky="e", padx=8, pady=2)
+    tempo_entry.grid(row=8, column=1, sticky="e", padx=8, pady=2)
 
     slowdown_var = tk.BooleanVar(value=False)
     slowdown_cb = ttk.Checkbutton(left, text="Enable slowdown to the end of the song", variable=slowdown_var, style="PT.TCheckbutton")
-    slowdown_cb.grid(row=8, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
+    slowdown_cb.grid(row=9, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
 
     # These two exports are useful defaults in practice.
     export_wav_var = tk.BooleanVar(value=True)
     export_wav_cb = ttk.Checkbutton(left, text="Export rendered songs as WAV", variable=export_wav_var, style="PT.TCheckbutton")
-    export_wav_cb.grid(row=9, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    export_wav_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
 
     save_params_var = tk.BooleanVar(value=True)
     save_params_cb = ttk.Checkbutton(left, text="Save song parameters", variable=save_params_var, style="PT.TCheckbutton")
-    save_params_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    save_params_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
     vibrato_var = tk.BooleanVar(value=False)
     vibrato_cb = ttk.Checkbutton(left, text="Disable vibrato in samples", variable=vibrato_var, style="PT.TCheckbutton")
-    vibrato_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
+    vibrato_cb.grid(row=12, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
 
 
-    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=12, column=0, columnspan=2, sticky="w", padx=8)
+    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=13, column=0, columnspan=2, sticky="w", padx=8)
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
 
@@ -2674,16 +2836,16 @@ def run_gui():
         cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
         cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
 
-    add_inst_row(13, "CH1", inst_vars[0])
-    add_inst_row(14, "CH2", inst_vars[1])
-    add_inst_row(15, "CH3", inst_vars[2])
-    add_inst_row(16, "CH4", inst_vars[3])
+    add_inst_row(14, "CH1", inst_vars[0])
+    add_inst_row(15, "CH2", inst_vars[1])
+    add_inst_row(16, "CH3", inst_vars[2])
+    add_inst_row(17, "CH4", inst_vars[3])
 
     # Keep the left panel compact; song details are written to the log on the right.
 
     # buttons
     btn_frame = tk.Frame(left, bg="#8f8f8f")
-    btn_frame.grid(row=18, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    btn_frame.grid(row=19, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     gen_btn = ttk.Button(btn_frame, text="GENERATE", style="PT.TButton")
     play_btn = ttk.Button(btn_frame, text="PLAY", style="PT.TButton")
@@ -2978,7 +3140,7 @@ def run_gui():
                     pass
             
             order_list = parse_order_string(order_var.get())
-            validate_order(order_list, n_patterns=10)
+            validate_order(order_list, n_patterns=PATTERN_COUNT)
 
             spd = parse_int_field("Speed", speed_var.get(), 1, 31)
             bpm = parse_int_field("Tempo", tempo_var.get(), 32, 255)
@@ -2994,6 +3156,7 @@ def run_gui():
                 melody_name=melody_var.get(),
                 derive_mode=derive_var.get(),
                 disable_vibrato=vibrato_var.get(),
+                key_root_override=key_var.get(),
             )
 
             last_song = song
@@ -3354,6 +3517,7 @@ def main():
     ap.add_argument("-melody", type=str, default=None, help="CLI: base melody preset name (or omit for Random).")
     ap.add_argument("-derive", type=str, default="Random", choices=["Random", "Near", "Far"], help="CLI: melody derivation style (Random/Near/Far).")
     ap.add_argument("-novibrato", action="store_true", help="CLI: disable vibrato in generated samples.")
+    ap.add_argument("-key", type=str, default=None, help="CLI: base key root (e.g. C-2, F#-2, Bb-2). Empty=Random.")
 
     args = ap.parse_args()
 
@@ -3383,6 +3547,7 @@ def main():
         melody_name=(args.melody if args.melody else None),
         derive_mode=args.derive,
         disable_vibrato=bool(args.novibrato),
+        key_root_override=(args.key if args.key else None),
     )
     print(f"Generated: {path}")
 
