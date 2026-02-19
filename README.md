@@ -7,7 +7,15 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit afbff2a (latest / 19.02.2026 v1.6.5):</b></i>
+<i><b>New in Commit (latest / 19.02.2026 v1.6.5):</b></i>
+
+- Feature added to use a generated song as a synthetic base for a new song
+- Improoved Melody generation
+
+<img width="1045" height="714" alt="166" src="https://github.com/user-attachments/assets/1d43b087-8afe-488d-bf33-fff2a43afdd6" />
+
+
+<i><b>New in Commit afbff2a (18.02.2026 v1.6.5):</b></i>
 
 - Added Patterns
 - Added Instuments
