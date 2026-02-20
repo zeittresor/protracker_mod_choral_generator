@@ -1,0 +1,3 @@
+mode: major
+tempo_hint: 100-150
+preferred_key_range: C-2..G-2
