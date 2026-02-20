@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.6.6)
+# ProTracker MOD Choral Generator (v1.7.1)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -70,6 +70,8 @@ def normalize_key_root(s: str | None) -> str | None:
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
+SCALE_MODE_CHOICES = ["Auto", "Major", "Minor", "Dorian", "Mixolydian"]
+
 DEFAULT_ORDER_STR = "0, 10, 6, 11, 2, 12, 7, 13, 4, 14, 9, 15, 5"
 
 # How many base patterns are generated (0..PATTERN_COUNT-1).
@@ -101,6 +103,14 @@ ORDER_PRESETS = [
     "6, 10, 7, 11, 8, 12, 9, 13, 5",
     "0, 2, 10, 12, 6, 7, 13, 14, 4, 15, 9, 5",
     "0, 10, 16, 11, 17, 12, 18, 13, 19, 14, 15, 5",
+
+    # extra long-form / high-variation presets
+    "0, 3, 10, 6, 11, 7, 12, 8, 13, 9, 14, 18, 19, 5",
+    "0, 10, 12, 6, 7, 13, 2, 14, 8, 15, 9, 16, 19, 5",
+    "0, 6, 10, 7, 13, 8, 18, 9, 16, 17, 19, 5",
+    "0, 1, 3, 6, 10, 15, 7, 13, 4, 14, 9, 16, 19, 5",
+    "0, 2, 12, 6, 11, 7, 17, 8, 18, 9, 19, 5",
+    "0, 10, 6, 7, 13, 8, 14, 18, 9, 15, 19, 5",
 
 ]
 
@@ -207,6 +217,44 @@ MELODY_LIBRARY: dict[str, list[list[tuple[int | None, int, int]]]] = {
         [(5, 0, 8), (2, 0, 4), (0, 0, 4)],
     ],
 
+    # Extra built-ins (traditional / public domain-ish motifs, plus original variations)
+    "Greensleeves (trad. approx., minor)": [
+        [(0, 0, 4), (2, 0, 4), (3, 0, 4), (4, 0, 4)],
+        [(5, 0, 4), (4, 0, 4), (3, 0, 4), (1, 0, 4)],
+        [(0, 0, 4), (2, 0, 4), (3, 0, 4), (4, 0, 4)],
+        [(3, 0, 8), (2, 0, 4), (0, 0, 4)],
+    ],
+    "Dona Nobis Pacem (trad. approx.)": [
+        [(0, 0, 4), (1, 0, 4), (2, 0, 4), (3, 0, 4)],
+        [(2, 0, 4), (1, 0, 4), (0, 0, 8)],
+        [(0, 0, 4), (1, 0, 4), (2, 0, 4), (3, 0, 4)],
+        [(4, 0, 8), (2, 0, 4), (0, 0, 4)],
+    ],
+    "Kumbaya (trad. approx.)": [
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (4, 0, 4)],
+        [(5, 0, 4), (4, 0, 4), (2, 0, 4), (0, 0, 4)],
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (5, 0, 4)],
+        [(4, 0, 8), (2, 0, 4), (0, 0, 4)],
+    ],
+    "Adeste Fideles (trad. approx.)": [
+        [(0, 0, 4), (0, 0, 4), (2, 0, 4), (4, 0, 4)],
+        [(5, 0, 4), (4, 0, 4), (2, 0, 4), (0, 0, 4)],
+        [(2, 0, 4), (4, 0, 4), (5, 0, 4), (6, 0, 4)],
+        [(5, 0, 8), (4, 0, 4), (2, 0, 4)],
+    ],
+    "Chorale Motif II (original)": [
+        [(0, 0, 4), (2, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(3, 0, 4), (1, 0, 4), (2, 0, 4), (0, 0, 4)],
+        [(4, 0, 4), (5, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(1, 0, 4), (0, 0, 8), (None, 0, 4)],
+    ],
+    "Gospel Shuffle (original)": [
+        [(0, 0, 2), (2, 0, 2), (3, 0, 4), (4, 0, 4), (2, 0, 4)],
+        [(0, 0, 4), (2, 0, 2), (3, 0, 2), (4, 0, 4), (5, 0, 4)],
+        [(4, 0, 4), (3, 0, 2), (2, 0, 2), (1, 0, 4), (0, 0, 4)],
+        [(0, 0, 8), (4, 0, 4), (0, 0, 4)],
+    ],
+
 }
 
 # -----------------------------
@@ -304,10 +352,19 @@ def _default_plugin_info_text(display_name: str) -> str:
     n = (display_name or "").lower()
     mode = "minor" if ("minor" in n or "moll" in n) else "major"
     tempo_hint = "90-140" if mode == "minor" else "100-150"
+    try:
+        a, b = tempo_hint.split("-", 1)
+        tempo_min = int(a)
+        tempo_max = int(b)
+    except Exception:
+        tempo_min = 90
+        tempo_max = 140
     preferred_key_range = "C-2..G-2"
     return (
         f"mode: {mode}\n"
         f"tempo_hint: {tempo_hint}\n"
+        f"tempo_min: {tempo_min}\n"
+        f"tempo_max: {tempo_max}\n"
         f"preferred_key_range: {preferred_key_range}\n"
     )
 
@@ -766,6 +823,10 @@ INSTRUMENT_CHOICES = [
     "Bell",
     "Flute",
     "Oboe",
+    "Bassoon",
+    "Choir Ooh",
+    "Synth Lead",
+    "Square Lead",
 ]
 
 DEFAULT_INSTRUMENTS = ["Piano", "Piano", "Piano", "Piano"]
@@ -880,7 +941,7 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         vib_amt = 0.0
 
     # Envelope choices (kept conservative so pitch feels stable)
-    if kind in ("Synth Pad", "Violin", "Strings", "Choir Aah", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ", "French Horn", "Trumpet"):
+    if kind in ("Synth Pad", "Synth Lead", "Square Lead", "Violin", "Strings", "Choir Aah", "Choir Ooh", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ", "French Horn", "Trumpet", "Bassoon"):
         attack = int(sr * rng.uniform(0.012, 0.040))
         decay = rng.uniform(0.18, 0.55)
     elif kind == "Tuba":
@@ -971,6 +1032,26 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         noise_amt = 0.020
         drive = 1.12
         lp_alpha = 0.20
+    elif kind == "Choir Ooh":
+        partials = [(1, 1.0), (2, 0.26), (3, 0.18), (4, 0.14), (5, 0.10), (6, 0.07)]
+        noise_amt = 0.018
+        drive = 1.10
+        lp_alpha = 0.18
+    elif kind == "Bassoon":
+        partials = [(1, 1.0), (2, 0.34), (3, 0.26), (4, 0.16), (5, 0.10)]
+        noise_amt = 0.010
+        drive = 1.18
+        lp_alpha = 0.14
+    elif kind == "Synth Lead":
+        partials = [(1, 1.0), (2, 0.55), (3, 0.36), (4, 0.26), (5, 0.20), (6, 0.16), (7, 0.13)]
+        noise_amt = 0.004
+        drive = 1.30
+        lp_alpha = 0.34
+    elif kind == "Square Lead":
+        partials = [(1, 1.0), (3, 0.34), (5, 0.20), (7, 0.14), (9, 0.11)]
+        noise_amt = 0.002
+        drive = 1.25
+        lp_alpha = 0.42
     elif kind == "French Horn":
         partials = [(1, 1.0), (2, 0.38), (3, 0.28), (4, 0.18), (5, 0.12)]
         noise_amt = 0.010
@@ -1014,7 +1095,7 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
         for k, a in partials:
             x += a * math.sin(2 * math.pi * (f * k) * t)
 
-        if kind in ("Synth Pad", "Violin", "Sax"):
+        if kind in ("Synth Pad", "Synth Lead", "Violin", "Sax"):
             x += 0.12 * math.sin(2 * math.pi * (f * detune) * t)
 
         if noise_amt > 0.0:
@@ -1076,6 +1157,65 @@ def bytes_to_float_sample(sample_bytes: bytes) -> list[float]:
 def major_scale(root_note: str) -> list[str]:
     intervals = [0, 2, 4, 5, 7, 9, 11]
     return [note_shift(root_note, i) for i in intervals]
+
+
+def scale_from_mode(root_note: str, mode: str | None) -> list[str]:
+    """Return a 7-note diatonic scale for a given mode.
+
+    Supported: major, minor (natural), dorian, mixolydian. Unknown -> major.
+    """
+    m = (mode or "major").strip().lower()
+    if m in ("auto", "random"):
+        m = "major"
+    if m.startswith("maj"):
+        intervals = [0, 2, 4, 5, 7, 9, 11]
+    elif m.startswith("min") or "moll" in m or "aeolian" in m:
+        intervals = [0, 2, 3, 5, 7, 8, 10]
+    elif m.startswith("dor"):
+        intervals = [0, 2, 3, 5, 7, 9, 10]
+    elif m.startswith("mix"):
+        intervals = [0, 2, 4, 5, 7, 9, 10]
+    else:
+        intervals = [0, 2, 4, 5, 7, 9, 11]
+    return [note_shift(root_note, i) for i in intervals]
+
+
+def parse_preferred_key_range(s: str | None) -> list[str]:
+    """Parse ranges like 'C-2..G-2' or 'C-2 - G-2' into a list of PT notes."""
+    if not s:
+        return []
+    t = str(s).strip()
+    if not t:
+        return []
+    # normalize separators
+    t = t.replace("—", "-").replace("–", "-")
+    if ".." in t:
+        a, b = t.split("..", 1)
+    elif "-" in t and t.count("-") >= 2 and "#" not in t:
+        # avoid splitting note like C#-2 incorrectly; fall through to regex
+        a, b = t.split("-", 1)
+    elif " - " in t:
+        a, b = t.split(" - ", 1)
+    else:
+        # single note
+        one = normalize_key_root(t)
+        return [one] if one else []
+
+    a = normalize_key_root(a)
+    b = normalize_key_root(b)
+    if not a or not b:
+        return []
+    try:
+        ia = CHROMATIC.index(a)
+        ib = CHROMATIC.index(b)
+    except Exception:
+        return []
+    if ia > ib:
+        ia, ib = ib, ia
+    out = []
+    for i in range(ia, ib + 1):
+        out.append(CHROMATIC[i])
+    return out
 
 
 def triad_from_degree(scale: list[str], degree: int, octave_bias: int = 0) -> tuple[str, str, str]:
@@ -1177,12 +1317,22 @@ def _mutate_events(
     events: list[tuple[str | None, int]],
     scale_up: list[str],
     mode: str,
+    strength: float = 1.0,
 ) -> list[tuple[str | None, int]]:
     """Mutate a bar's (note,dur) events.
 
     Near/far derivation uses these modes to add variation while staying in-key.
     """
     out: list[tuple[str | None, int]] = [(n, int(d)) for (n, d) in events]
+
+    st = float(strength)
+    if not (st == st):
+        st = 1.0
+    st = max(0.0, min(1.5, st))
+
+    def p(x: float) -> float:
+        # scale probability by strength, but keep sane bounds
+        return max(0.0, min(0.98, x * st))
 
     def _nearest_in_scale(note: str, step: int) -> str:
         cand = note_shift(note, step)
@@ -1227,7 +1377,7 @@ def _mutate_events(
             if n is None:
                 out2.append((None, d))
                 continue
-            if i >= len(out) - 2 and rng.random() < 0.85:
+            if i >= len(out) - 2 and rng.random() < p(0.85):
                 out2.append((_nearest_in_scale(n, rng.choice([-1, -2])), d))
             else:
                 out2.append((n, d))
@@ -1247,7 +1397,7 @@ def _mutate_events(
     if m == 'ornament':
         out2: list[tuple[str | None, int]] = []
         for n, d in out:
-            if n is not None and d >= 4 and rng.random() < 0.55:
+            if n is not None and d >= 4 and rng.random() < p(0.55):
                 d1 = 2
                 d2 = max(1, d - 2)
                 pn = _nearest_in_scale(n, rng.choice([-2, -1, 1, 2]))
@@ -1264,7 +1414,7 @@ def _mutate_events(
             if n is None or d <= 2:
                 out2.append((n, d))
                 continue
-            if d >= 4 and rng.random() < 0.75:
+            if d >= 4 and rng.random() < p(0.75):
                 # e.g. 2 + 2 (+ remainder)
                 nn = _nearest_in_scale(n, rng.choice([-1, 1, 2, -2]))
                 out2.append((n, 2))
@@ -1283,7 +1433,7 @@ def _mutate_events(
             if n is None or d <= 2:
                 out2.append((n, d))
                 continue
-            if d >= 4 and rng.random() < 0.85:
+            if d >= 4 and rng.random() < p(0.85):
                 step = rng.choice([-2, -1, 1, 2])
                 nn = _nearest_in_scale(n, step)
                 seg = 2
@@ -1304,7 +1454,7 @@ def _mutate_events(
             if n is None or d <= 2:
                 out2.append((n, d))
                 continue
-            if rng.random() < 0.65:
+            if rng.random() < p(0.65):
                 pn = _nearest_in_scale(n, rng.choice([-1, -2]))
                 out2.append((pn, 1))
                 out2.append((n, d - 1))
@@ -1362,16 +1512,33 @@ def make_patterns(
     melody_name: str | None = None,
     derive_mode: str | None = None,
     key_root_override: str | None = None,
+    scale_mode: str | None = None,
+    variation: float = 1.0,
 ):
     NUM_CH = 4
     ROWS = 64
     patterns: list[list[list[tuple[str | None, int, int, int]]]] = []
 
-    key_root = normalize_key_root(key_root_override) or rng.choice(['C-2', 'G-2', 'F-2', 'D-2'])
-    scale = major_scale(key_root)
-    scale_up = [note_shift(n, 12) for n in scale]
-
     base_melody_name, base_tpl, base_meta = _pick_base_melody(rng, melody_name)
+
+    # Key root selection: user override > plugin hint > default pool
+    key_root = normalize_key_root(key_root_override)
+    if key_root is None:
+        pref = None
+        try:
+            pref = (base_meta or {}).get('preferred_key_range') or (base_meta or {}).get('key_range')
+        except Exception:
+            pref = None
+        cand = parse_preferred_key_range(pref)
+        key_root = rng.choice(cand) if cand else rng.choice(['C-2', 'G-2', 'F-2', 'D-2'])
+
+    # Scale/mode: explicit GUI/CLI override, otherwise plugin meta 'mode'.
+    sm = (scale_mode or 'auto').strip().lower()
+    if sm in ('auto', 'random'):
+        pm = str((base_meta or {}).get('mode', '') or '').strip().lower()
+        sm = pm if pm else 'major'
+    scale = scale_from_mode(key_root, sm)
+    scale_up = [note_shift(n, 12) for n in scale]
 
     if base_tpl is None:
         # Pure algorithmic base melody
@@ -1478,7 +1645,13 @@ def make_patterns(
                 strong_note = scale_up[0]
             else:
                 mode = mode_for_pattern.get(p_idx, 'base')
-                bar_events = _mutate_events(rng, base_bars[bar], scale_up, mode)
+                # Variation strength: Near -> gentler; Far -> stronger
+                v = float(variation)
+                if not (v == v):
+                    v = 1.0
+                v = max(0.0, min(1.5, v))
+                st = (0.70 + 0.55 * v) if dm.startswith('n') or dm.startswith('c') else (0.95 + 0.70 * v)
+                bar_events = _mutate_events(rng, base_bars[bar], scale_up, mode, strength=st)
                 strong_note = next((n for (n, _) in bar_events if n is not None), scale_up[0])
 
             def _chord_up_for_degree(d: int):
@@ -1504,7 +1677,9 @@ def make_patterns(
             set_cell(p_idx, start_row, 2, bass)
             set_cell(p_idx, start_row, 3, third)
 
-            if p_idx != 3 and rng.random() < 0.55:
+            # Harmony density can be nudged by variation.
+            dens = max(0.15, min(0.90, 0.35 + 0.35 * max(0.0, min(1.5, float(variation)))) )
+            if p_idx != 3 and rng.random() < dens:
                 set_cell(p_idx, start_row + 8, 1, top)
                 set_cell(p_idx, start_row + 8, 2, bass)
 
@@ -1722,6 +1897,66 @@ def parse_order_string(order_str: str) -> list[int]:
     return order
 
 
+def generate_smart_order(rng: random.Random, n_patterns: int = PATTERN_COUNT) -> list[int]:
+    """Generate a musically sensible pattern order with variety.
+
+    This stays within 0..n_patterns-1 and tends to end with a cadence.
+    """
+    n_patterns = max(1, int(n_patterns))
+
+    def _f(lst: list[int]) -> list[int]:
+        return [x for x in lst if 0 <= x < n_patterns]
+
+    base = _f([0])
+    ornament = _f([1, 12])
+    answer = _f([2, 4, 14])
+    pad = _f([3, 17])
+    cadence = _f([5, 11, 19])
+    drive = _f([6, 10, 15, 18])
+    arp = _f([7, 13])
+    lift = _f([8, 18])
+    turn = _f([9, 16])
+    extra = _f([6, 7, 8, 9, 10, 13, 15, 16, 18])
+
+    def pick(lst: list[int], fallback: list[int]) -> int:
+        pool = lst if lst else fallback
+        pool = pool if pool else [0]
+        return rng.choice(pool)
+
+    order: list[int] = []
+    order.append(pick(base, [0]))
+    if rng.random() < 0.35:
+        order.append(pick(pad, [0]))
+
+    # 2–4 blocks
+    blocks = rng.randint(2, 4)
+    for _ in range(blocks):
+        order.append(pick(ornament, [0]))
+        if rng.random() < 0.70:
+            order.append(pick(answer, [0]))
+        if rng.random() < 0.75:
+            order.append(pick(drive, extra or [0]))
+        if rng.random() < 0.55:
+            order.append(pick(arp, extra or [0]))
+        if rng.random() < 0.45:
+            order.append(pick(lift, extra or [0]))
+        if rng.random() < 0.40:
+            order.append(pick(turn, extra or [0]))
+
+    # pre-ending
+    if rng.random() < 0.55:
+        order.append(pick(pad, [0]))
+    order.append(pick(cadence, [5] if n_patterns > 5 else [0]))
+
+    # ensure reasonable length
+    if len(order) < 6 and extra:
+        while len(order) < 6:
+            order.insert(-1, rng.choice(extra))
+    if len(order) > 24:
+        order = order[:23] + [order[-1]]
+    return order
+
+
 def validate_order(order: list[int], n_patterns: int = PATTERN_COUNT) -> None:
     if len(order) > 128:
         raise ValueError("Order is too long (max 128 positions).")
@@ -1735,6 +1970,8 @@ class SongData:
     title_txt: str
     seed: int
     key_root: str
+    scale_mode: str
+    variation: float
     base_melody: str
     base_melody_meta: dict[str, str]
     patterns: list
@@ -1748,6 +1985,8 @@ class SongData:
     slowdown_enabled: bool
     derive_mode: str
     vibrato_disabled: bool
+    mute_channels: list[bool]
+    stereo_width: float
 
 
 def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
@@ -1896,6 +2135,11 @@ def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
     lines.append(f"seed: {song.seed}")
     lines.append(f"title: {song.title_txt}")
     lines.append(f"key_root: {song.key_root}")
+    lines.append(f"scale_mode: {getattr(song, 'scale_mode', '')}")
+    try:
+        lines.append(f"variation: {float(getattr(song, 'variation', 0.0)):.3f}")
+    except Exception:
+        lines.append("variation: ")
     lines.append(f"base_melody: {song.base_melody}")
     if getattr(song, "base_melody_meta", None):
         try:
@@ -1911,6 +2155,16 @@ def save_song_parameters_txt(mod_path: Path, song: SongData) -> Path:
     lines.append(f"slowdown_enabled: {bool(song.slowdown_enabled)}")
     lines.append(f"derive_mode: {getattr(song, 'derive_mode', '')}")
     lines.append(f"vibrato_disabled: {bool(getattr(song, 'vibrato_disabled', False))}")
+    try:
+        mc = getattr(song, 'mute_channels', [False, False, False, False])
+        mc = [(bool(mc[i]) if i < len(mc) else False) for i in range(4)]
+        lines.append(f"mute_channels: {''.join('1' if x else '0' for x in mc)}")
+    except Exception:
+        pass
+    try:
+        lines.append(f"stereo_width: {float(getattr(song, 'stereo_width', 1.0)):.3f}")
+    except Exception:
+        pass
     lines.append("")
     lines.append("instruments:")
     for i, k in enumerate(song.instrument_kinds, start=1):
@@ -1977,6 +2231,10 @@ def generate_song(
     derive_mode: str | None = "Random",
     disable_vibrato: bool = False,
     key_root_override: str | None = None,
+    scale_mode: str | None = None,
+    variation: float = 1.0,
+    mute_channels: list[bool] | None = None,
+    stereo_width: float = 1.0,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
@@ -1998,7 +2256,16 @@ def generate_song(
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
-    patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(rng, speed=speed, tempo=tempo, melody_name=melody_name, derive_mode=derive_mode, key_root_override=key_root_override)
+    patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(
+        rng,
+        speed=speed,
+        tempo=tempo,
+        melody_name=melody_name,
+        derive_mode=derive_mode,
+        key_root_override=key_root_override,
+        scale_mode=scale_mode,
+        variation=variation,
+    )
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
@@ -2057,6 +2324,12 @@ def generate_song(
         title_txt=title_txt,
         seed=int(seed),
         key_root=key_root,
+        scale_mode=(
+            (str(scale_mode).strip() if scale_mode is not None else "Auto")
+            if str(scale_mode or "").strip().lower() not in ("auto", "random", "")
+            else str((base_melody_meta or {}).get('mode', 'major') or 'major')
+        ),
+        variation=float(variation),
         base_melody=base_melody,
         base_melody_meta=dict(base_melody_meta or {}),
         patterns=patterns,
@@ -2070,6 +2343,11 @@ def generate_song(
         slowdown_enabled=bool(enable_slowdown),
         derive_mode=str(derive_used),
         vibrato_disabled=bool(disable_vibrato),
+        mute_channels=(
+            [(bool(mute_channels[i]) if i < len(mute_channels) else False) for i in range(4)]
+            if mute_channels is not None else [False, False, False, False]
+        ),
+        stereo_width=float(stereo_width),
     )
 
     return path, song
@@ -2153,8 +2431,7 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
             vol0, vol1, vol2, vol3 = chan_vol
 
             for _ in range(n):
-                l = 0.0
-                r = 0.0
+                # raw per-channel contributions (mono)
                 c0 = c1 = c2 = c3 = 0.0
 
                 # channel 0 (L)
@@ -2165,7 +2442,6 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                     if i0 < len(samp_arr):
                         v = samp_arr[i0] * (vol0 / 64.0)
                         c0 = v
-                        l += v
                     pos0 += step
 
                 # channel 1 (R)
@@ -2176,7 +2452,6 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                     if i1 < len(samp_arr):
                         v = samp_arr[i1] * (vol1 / 64.0)
                         c1 = v
-                        r += v
                     pos1 += step
 
                 # channel 2 (R)
@@ -2187,7 +2462,6 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                     if i2 < len(samp_arr):
                         v = samp_arr[i2] * (vol2 / 64.0)
                         c2 = v
-                        r += v
                     pos2 += step
 
                 # channel 3 (L)
@@ -2198,16 +2472,46 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                     if i3 < len(samp_arr):
                         v = samp_arr[i3] * (vol3 / 64.0)
                         c3 = v
-                        l += v
                     pos3 += step
 
+                # mutes + panning (tracker-ish). Width scales the pan amount.
+                mutes = getattr(song, 'mute_channels', [False, False, False, False])
+                try:
+                    if len(mutes) < 4:
+                        mutes = list(mutes) + [False] * (4 - len(mutes))
+                except Exception:
+                    mutes = [False, False, False, False]
+                if mutes[0]:
+                    c0 = 0.0
+                if mutes[1]:
+                    c1 = 0.0
+                if mutes[2]:
+                    c2 = 0.0
+                if mutes[3]:
+                    c3 = 0.0
+
+                width = float(getattr(song, 'stereo_width', 1.0) or 1.0)
+                if not (width == width):
+                    width = 1.0
+                width = max(0.0, min(2.0, width))
+                pans = [-0.70, 0.70, 0.30, -0.30]
+                pans = [p * width for p in pans]
+
+                l = r = 0.0
+                for c, pan in ((c0, pans[0]), (c1, pans[1]), (c2, pans[2]), (c3, pans[3])):
+                    lg = 0.5 * (1.0 - pan)
+                    rg = 0.5 * (1.0 + pan)
+                    l += c * lg
+                    r += c * rg
+
                 # mild master gain to avoid clipping
-                l *= 0.25
-                r *= 0.25
-                c0 *= 0.25
-                c1 *= 0.25
-                c2 *= 0.25
-                c3 *= 0.25
+                master = 0.40
+                l *= master
+                r *= master
+                c0 *= master
+                c1 *= master
+                c2 *= master
+                c3 *= master
 
                 l = _clamp01(l)
                 r = _clamp01(r)
@@ -2820,12 +3124,28 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.6.6)")
+    root.title("ProTracker MOD Choral Generator (v1.7.1)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
+    # but avoid cutting off the bottom on some Windows setups by starting taller.
     try:
-        root.geometry("1040x680")
-        root.minsize(1040, 680)
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        w = min(1040, max(980, sw - 80))
+        h = min(860, max(760, sh - 140))
+        root.geometry(f"{w}x{h}")
+        root.minsize(min(1040, w), min(720, h))
+    except Exception:
+        try:
+            root.geometry("1040x840")
+            root.minsize(1040, 760)
+        except Exception:
+            pass
+
+    # allow the UI to expand when the window is resized
+    try:
+        root.grid_rowconfigure(0, weight=1)
+        root.grid_columnconfigure(0, weight=1)
     except Exception:
         pass
 
@@ -2848,11 +3168,23 @@ def run_gui():
     main = ttk.Frame(root, style="PT.TFrame", padding=10)
     main.grid(row=0, column=0, sticky="nsew")
 
+    try:
+        main.grid_rowconfigure(0, weight=1)
+        main.grid_columnconfigure(1, weight=1)
+    except Exception:
+        pass
+
     left = tk.Frame(main, bg="#8f8f8f", bd=2, relief="ridge")
     left.grid(row=0, column=0, sticky="nsw", padx=(0, 10))
 
     right = tk.Frame(main, bg="#8f8f8f", bd=2, relief="ridge")
     right.grid(row=0, column=1, sticky="nsew")
+
+    try:
+        right.grid_rowconfigure(0, weight=1)
+        right.grid_columnconfigure(0, weight=1)
+    except Exception:
+        pass
 
     root.columnconfigure(0, weight=1)
     root.rowconfigure(0, weight=1)
@@ -3003,7 +3335,21 @@ def run_gui():
         except Exception:
             pass
 
-    pt_label(left, "PATTERN ORDER").grid(row=0, column=0, columnspan=2, sticky="w", padx=8, pady=(8, 2))
+    # Pattern order + quick "smart order" generator
+    pt_label(left, "PATTERN ORDER").grid(row=0, column=0, sticky="w", padx=8, pady=(8, 2))
+
+    def _smart_order_generate() -> str:
+        # Use seed if provided for reproducibility.
+        try:
+            s = seed_var.get().strip()
+            base_seed = int(s) if s else int(time.time() * 1000)
+        except Exception:
+            base_seed = int(time.time() * 1000)
+        rr = random.Random(base_seed ^ 0xA5A5)
+        return ", ".join(str(x) for x in generate_smart_order(rr, n_patterns=PATTERN_COUNT))
+
+    smart_btn = ttk.Button(left, text="SMART", style="PT.TButton", command=lambda: order_var.set(_smart_order_generate()))
+    smart_btn.grid(row=0, column=1, sticky="e", padx=8, pady=(8, 2))
 
     order_var = tk.StringVar(value=DEFAULT_ORDER_STR)
     order_combo = ttk.Combobox(left, textvariable=order_var, values=ORDER_PRESETS, width=32, style="PT.TCombobox", state="normal")
@@ -3024,6 +3370,46 @@ def run_gui():
     key_entry = tk.Entry(left, textvariable=key_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     key_entry.grid(row=6, column=1, sticky="e", padx=8, pady=2)
 
+    # Advanced options (kept in a compact panel to avoid clutter)
+    adv = tk.Frame(left, bg="#8f8f8f", bd=2, relief="ridge")
+    adv.grid(row=9, column=0, columnspan=2, sticky="we", padx=8, pady=(6, 10))
+    adv.columnconfigure(1, weight=1)
+
+    pt_label(adv, "SCALE MODE").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
+    scale_mode_var = tk.StringVar(value="Auto")
+    scale_combo = ttk.Combobox(adv, textvariable=scale_mode_var, values=SCALE_MODE_CHOICES, width=14, style="PT.TCombobox", state="readonly")
+    scale_combo.grid(row=0, column=1, sticky="e", padx=6, pady=(6, 2))
+
+    pt_label(adv, "VARIATION").grid(row=1, column=0, sticky="w", padx=6, pady=(2, 2))
+    variation_var = tk.IntVar(value=65)
+    variation_scale = tk.Scale(adv, from_=0, to=100, orient="horizontal", variable=variation_var, length=180, bg="#8f8f8f", highlightthickness=0)
+    variation_scale.grid(row=1, column=1, sticky="e", padx=6, pady=(2, 2))
+
+    pt_label(adv, "SEED (optional)").grid(row=2, column=0, sticky="w", padx=6, pady=(2, 2))
+    seed_var = tk.StringVar(value="")
+    seed_row = tk.Frame(adv, bg="#8f8f8f")
+    seed_row.grid(row=2, column=1, sticky="e", padx=6, pady=(2, 2))
+    seed_entry = tk.Entry(seed_row, textvariable=seed_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
+    seed_entry.pack(side="left")
+    ttk.Button(seed_row, text="RND", style="PT.TButton", command=lambda: seed_var.set(str(int(time.time()*1000) ^ (os.getpid()<<8)))).pack(side="left", padx=(6, 0))
+
+    pt_label(adv, "BATCH").grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
+    batch_var = tk.IntVar(value=1)
+    batch_spin = tk.Spinbox(adv, from_=1, to=50, textvariable=batch_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
+    batch_spin.grid(row=3, column=1, sticky="e", padx=6, pady=(2, 6))
+
+    pt_label(adv, "MUTE CH").grid(row=4, column=0, sticky="w", padx=6, pady=(2, 6))
+    mute_vars = [tk.BooleanVar(value=False) for _ in range(4)]
+    mute_row = tk.Frame(adv, bg="#8f8f8f")
+    mute_row.grid(row=4, column=1, sticky="e", padx=6, pady=(2, 6))
+    for i in range(4):
+        ttk.Checkbutton(mute_row, text=f"{i+1}", variable=mute_vars[i], style="PT.TCheckbutton").pack(side="left")
+
+    pt_label(adv, "STEREO %").grid(row=5, column=0, sticky="w", padx=6, pady=(0, 6))
+    width_var = tk.IntVar(value=100)
+    width_scale = tk.Scale(adv, from_=0, to=200, orient="horizontal", variable=width_var, length=180, bg="#8f8f8f", highlightthickness=0)
+    width_scale.grid(row=5, column=1, sticky="e", padx=6, pady=(0, 6))
+
 
 
     pt_label(left, "SPEED").grid(row=7, column=0, sticky="w", padx=8)
@@ -3038,22 +3424,49 @@ def run_gui():
 
     slowdown_var = tk.BooleanVar(value=False)
     slowdown_cb = ttk.Checkbutton(left, text="Enable slowdown to the end of the song", variable=slowdown_var, style="PT.TCheckbutton")
-    slowdown_cb.grid(row=9, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
+    slowdown_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
 
     # These two exports are useful defaults in practice.
     export_wav_var = tk.BooleanVar(value=True)
     export_wav_cb = ttk.Checkbutton(left, text="Export rendered songs as WAV", variable=export_wav_var, style="PT.TCheckbutton")
-    export_wav_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    export_wav_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
 
     save_params_var = tk.BooleanVar(value=True)
     save_params_cb = ttk.Checkbutton(left, text="Save song parameters", variable=save_params_var, style="PT.TCheckbutton")
-    save_params_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    save_params_cb.grid(row=12, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
     vibrato_var = tk.BooleanVar(value=False)
     vibrato_cb = ttk.Checkbutton(left, text="Disable vibrato in samples", variable=vibrato_var, style="PT.TCheckbutton")
-    vibrato_cb.grid(row=12, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
+    vibrato_cb.grid(row=13, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
 
 
-    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=13, column=0, columnspan=2, sticky="w", padx=8)
+    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=14, column=0, sticky="w", padx=8)
+
+    def _randomize_instruments():
+        # curated palettes that tend to blend well
+        palettes = [
+            ["Piano", "Piano", "Piano", "Piano"],
+            ["Piano", "Strings", "Choir Aah", "Organ"],
+            ["Electric Piano", "Synth Pad", "Strings", "Choir Ooh"],
+            ["Organ", "Choir Aah", "French Horn", "Bassoon"],
+            ["Harp", "Strings", "Choir Ooh", "Flute"],
+            ["Synth Pad", "Synth Lead", "Square Lead", "Bassoon"],
+            ["Clarinet", "Sax", "French Horn", "Tuba"],
+        ]
+        try:
+            # deterministic with seed if provided
+            st = seed_var.get().strip()
+            rr = random.Random(int(st) if st else int(time.time() * 1000))
+        except Exception:
+            rr = random.Random(int(time.time() * 1000))
+        pal = rr.choice(palettes)
+        for i in range(4):
+            try:
+                inst_vars[i].set(pal[i])
+            except Exception:
+                pass
+
+    rnd_inst_btn = ttk.Button(left, text="RND", style="PT.TButton", command=_randomize_instruments)
+    rnd_inst_btn.grid(row=14, column=1, sticky="e", padx=8)
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
 
@@ -3062,16 +3475,16 @@ def run_gui():
         cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
         cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
 
-    add_inst_row(14, "CH1", inst_vars[0])
-    add_inst_row(15, "CH2", inst_vars[1])
-    add_inst_row(16, "CH3", inst_vars[2])
-    add_inst_row(17, "CH4", inst_vars[3])
+    add_inst_row(15, "CH1", inst_vars[0])
+    add_inst_row(16, "CH2", inst_vars[1])
+    add_inst_row(17, "CH3", inst_vars[2])
+    add_inst_row(18, "CH4", inst_vars[3])
 
     # Keep the left panel compact; song details are written to the log on the right.
 
     # buttons
     btn_frame = tk.Frame(left, bg="#8f8f8f")
-    btn_frame.grid(row=19, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    btn_frame.grid(row=20, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     gen_btn = ttk.Button(btn_frame, text="GENERATE", style="PT.TButton")
     play_btn = ttk.Button(btn_frame, text="PLAY", style="PT.TButton")
@@ -3377,20 +3790,62 @@ def run_gui():
 
             instruments = [v.get() for v in inst_vars]
 
-            path, song = generate_song(
-                order=order_list,
-                enable_slowdown=slowdown_var.get(),
-                speed=spd,
-                tempo=bpm,
-                instruments=instruments,
-                melody_name=melody_var.get(),
-                derive_mode=derive_var.get(),
-                disable_vibrato=vibrato_var.get(),
-                key_root_override=key_var.get(),
-            )
+            # seed/batch
+            seed_base: int | None = None
+            try:
+                st = seed_var.get().strip()
+                seed_base = int(st) if st else None
+            except Exception:
+                seed_base = None
+            try:
+                batch_n = int(batch_var.get())
+            except Exception:
+                batch_n = 1
+            batch_n = max(1, min(50, batch_n))
+            if seed_base is None:
+                seed_base = int(time.time() * 1000) ^ (os.getpid() << 8)
+                try:
+                    seed_var.set(str(seed_base))
+                except Exception:
+                    pass
 
-            last_song = song
-            last_mod_path = path
+            last_path = None
+            last_song_local = None
+
+            scale_mode = scale_mode_var.get()
+            variation = max(0.0, min(1.5, float(variation_var.get()) / 100.0))
+            mutes = [mv.get() for mv in mute_vars]
+            stereo_width = max(0.0, min(2.0, float(width_var.get()) / 100.0))
+
+            for i in range(batch_n):
+                seed_i = int(seed_base) + i
+                path, song = generate_song(
+                    order=order_list,
+                    seed=seed_i,
+                    enable_slowdown=slowdown_var.get(),
+                    speed=spd,
+                    tempo=bpm,
+                    instruments=instruments,
+                    melody_name=melody_var.get(),
+                    derive_mode=derive_var.get(),
+                    disable_vibrato=vibrato_var.get(),
+                    key_root_override=key_var.get(),
+                    scale_mode=scale_mode,
+                    variation=variation,
+                    mute_channels=mutes,
+                    stereo_width=stereo_width,
+                )
+                last_path = path
+                last_song_local = song
+                log(f"Generated: {path}")
+                if batch_n > 1:
+                    try:
+                        log(f"  batch {i+1}/{batch_n} | seed={seed_i}")
+                    except Exception:
+                        pass
+
+            last_song = last_song_local
+            last_mod_path = last_path
 
             # invalidate preview cache
             preview_pcm = None
@@ -3399,15 +3854,23 @@ def run_gui():
             preview_sr = 44100
             preview_ch = None
 
+            song = last_song
+            path = last_mod_path
+            if song is None or path is None:
+                raise RuntimeError("Generation failed")
+
             derive_txt = getattr(song, "derive_mode", "")
             vib_txt = "OFF" if getattr(song, "vibrato_disabled", False) else "ON"
-            log(f"Generated: {path}")
             log(f"Melody: {song.base_melody}")
             meta_disp = get_plugin_metadata_display(song.base_melody)
             if meta_disp:
                 log(f"Melody meta: {meta_disp}")
-            log(f"Derive: {derive_txt} | Vibrato: {vib_txt}")
+            log(f"Derive: {derive_txt} | Scale: {getattr(song, 'scale_mode', '')} | Var: {getattr(song, 'variation', 0):.2f} | Vibrato: {vib_txt}")
             log(f"Instruments: {', '.join(song.instrument_kinds)}")
+            try:
+                log(f"Mute: {''.join(['1' if x else '0' for x in getattr(song, 'mute_channels', [False, False, False, False])])} | Stereo: {getattr(song,'stereo_width',1.0):.2f}")
+            except Exception:
+                pass
 
             try:
                 patt_combo.configure(values=[str(i) for i in range(len(song.patterns))])
@@ -3752,6 +4215,12 @@ def main():
     ap.add_argument("-derive", type=str, default="Random", choices=["Random", "Near", "Far"], help="CLI: melody derivation style (Random/Near/Far).")
     ap.add_argument("-novibrato", action="store_true", help="CLI: disable vibrato in generated samples.")
     ap.add_argument("-key", type=str, default=None, help="CLI: base key root (e.g. C-2, F#-2, Bb-2). Empty=Random.")
+    ap.add_argument("-scale", type=str, default="Auto", choices=SCALE_MODE_CHOICES, help="CLI: scale/mode (Auto/Major/Minor/Dorian/Mixolydian).")
+    ap.add_argument("-variation", type=float, default=0.65, help="CLI: variation strength 0..1.5 (default 0.65).")
+    ap.add_argument("-seed", type=int, default=None, help="CLI: seed for deterministic generation.")
+    ap.add_argument("-batch", type=int, default=1, help="CLI: generate N songs (seeds will increment).")
+    ap.add_argument("-mute", type=str, default="0000", help="CLI: mute channels as 4-bit string, e.g. 0101 mutes CH2+CH4.")
+    ap.add_argument("-stereo", type=float, default=1.0, help="CLI: stereo width 0..2 (default 1.0).")
 
     args = ap.parse_args()
 
@@ -3772,18 +4241,32 @@ def main():
 
     order_list = parse_order_string(args.order) if args.order else None
 
-    path, _ = generate_song(
-        enable_slowdown=not args.noslowdown,
-        speed=int(speed),
-        tempo=int(tempo),
-        instruments=instruments,
-        order=order_list,
-        melody_name=(args.melody if args.melody else None),
-        derive_mode=args.derive,
-        disable_vibrato=bool(args.novibrato),
-        key_root_override=(args.key if args.key else None),
-    )
-    print(f"Generated: {path}")
+    # mutes
+    m = str(args.mute or "0000").strip()
+    m = (m + "0000")[:4]
+    mute_channels = [(c == "1") for c in m]
+
+    batch_n = max(1, min(50, int(args.batch or 1)))
+    seed_base = int(args.seed) if args.seed is not None else int(time.time() * 1000) ^ (os.getpid() << 8)
+
+    for i in range(batch_n):
+        path, _ = generate_song(
+            enable_slowdown=not args.noslowdown,
+            speed=int(speed),
+            tempo=int(tempo),
+            instruments=instruments,
+            order=order_list,
+            melody_name=(args.melody if args.melody else None),
+            derive_mode=args.derive,
+            disable_vibrato=bool(args.novibrato),
+            key_root_override=(args.key if args.key else None),
+            seed=seed_base + i,
+            scale_mode=args.scale,
+            variation=float(args.variation),
+            mute_channels=mute_channels,
+            stereo_width=float(args.stereo),
+        )
+        print(f"Generated: {path}")
 
 
 if __name__ == "__main__":
