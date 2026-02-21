@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.7.1)
+# ProTracker MOD Choral Generator (v1.7.3)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -67,12 +67,27 @@ def normalize_key_root(s: str | None) -> str | None:
     norm = f"{note}-{octv}"
     return norm if norm in CHROMATIC_SET else None
 
+
+def random_key_root() -> str:
+    # Prefer common choral keys, octave 2
+    pool = [
+        "C-2","D-2","E-2","F-2","G-2","A-2","B-2",
+        "C#2","D#2","F#2","G#2","A#2",
+    ]
+    rr = random.SystemRandom()
+    return rr.choice(pool)
+
+
+def random_seed_value() -> int:
+    # 64-bit-ish random seed; not time-range clustered.
+    return (int.from_bytes(os.urandom(8), "big") ^ (time.time_ns() & 0xFFFFFFFFFFFF)) & 0x7FFFFFFFFFFFFFFF
+
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
 SCALE_MODE_CHOICES = ["Auto", "Major", "Minor", "Dorian", "Mixolydian"]
 
-DEFAULT_ORDER_STR = "0, 10, 6, 11, 2, 12, 7, 13, 4, 14, 9, 15, 5"
+DEFAULT_ORDER_STR = "5, 5, 1, 5, 10, 3, 4, 2, 5, 0"
 
 # How many base patterns are generated (0..PATTERN_COUNT-1).
 PATTERN_COUNT = 20
@@ -1454,10 +1469,11 @@ def _mutate_events(
             if n is None or d <= 2:
                 out2.append((n, d))
                 continue
-            if rng.random() < p(0.65):
+            # Use a 2-row pickup (instead of 1-row) to keep the rhythm "in the grid".
+            if d >= 4 and rng.random() < p(0.65):
                 pn = _nearest_in_scale(n, rng.choice([-1, -2]))
-                out2.append((pn, 1))
-                out2.append((n, d - 1))
+                out2.append((pn, 2))
+                out2.append((n, d - 2))
             else:
                 out2.append((n, d))
         return out2
@@ -1805,7 +1821,8 @@ def make_patterns(
                 seq = [bass, bass5, bass, bass5]
                 for i in range(0, 16, 4):
                     set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
-                for i in (1, 9):
+                # Keep pickups on an 8th-grid (avoid row 1 "off-grid" feel)
+                for i in (2, 10):
                     set_cell(p_idx, start_row + i, 1, chord_up[1])
 
             if p_idx == 16:
@@ -1848,6 +1865,53 @@ def make_patterns(
                 tones = [t if t in CHROMATIC_SET else scale_up[0] for t in tones]
                 for i in range(0, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
+
+
+    # Harmonize accompaniment channels per-bar so CH2..CH4 stay chord-consistent.
+    # This reduces occasional "clashy" notes in highly varied patterns.
+    def _nearest_note(note: str, allowed: list[str]) -> str:
+        try:
+            ni = CHROMATIC.index(note)
+        except ValueError:
+            return allowed[0]
+        best = allowed[0]
+        best_d = 999
+        for a in allowed:
+            try:
+                ai = CHROMATIC.index(a)
+            except ValueError:
+                continue
+            d = abs(ai - ni)
+            if d < best_d:
+                best_d = d
+                best = a
+        return best
+
+    for p_idx, pat in enumerate(patterns):
+        prog = progs[p_idx]
+        for bar, deg in enumerate(prog):
+            r0 = bar * 16
+            rt, th, fi = triad_from_degree(scale, deg, octave_bias=0)
+            allowed = [rt, th, fi, note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12), note_shift(rt, -12)]
+            allowed = [n for n in allowed if n in CHROMATIC_SET]
+            if not allowed:
+                continue
+            for row in range(r0, r0 + 16):
+                # accompaniment channels: force chord tones
+                for ch in (1, 2, 3):
+                    note, samp, eff, par = pat[row][ch]
+                    if note is not None and note not in allowed:
+                        pat[row][ch] = (_nearest_note(note, allowed), samp, eff, par)
+                # melody: keep freedom, but snap strong beats if wildly off chord (rare)
+                if row in (r0, r0 + 8):
+                    note, samp, eff, par = pat[row][0]
+                    if note is not None and note not in allowed:
+                        nn = _nearest_note(note, allowed)
+                        try:
+                            if abs(CHROMATIC.index(nn) - CHROMATIC.index(note)) >= 3:
+                                pat[row][0] = (nn, samp, eff, par)
+                        except ValueError:
+                            pass
 
     # Ensure the selected speed/tempo is present in EVERY pattern.
     spd = max(1, min(31, int(speed)))
@@ -2240,7 +2304,7 @@ def generate_song(
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
     if seed is None:
-        seed = int(time.time() * 1000) ^ (os.getpid() << 8)
+        seed = int.from_bytes(os.urandom(8), "big") ^ (time.time_ns() & 0xFFFFFFFFFFFF)
     rng = random.Random(seed)
 
     inst_kinds = normalize_instrument_list(instruments)
@@ -3124,7 +3188,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.7.1)")
+    root.title("ProTracker MOD Choral Generator (v1.7.3)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -3191,9 +3255,286 @@ def run_gui():
     main.columnconfigure(1, weight=1)
     main.rowconfigure(0, weight=1)
 
+    # --- i18n + tooltips (EN/DE/FR) ---
+    LANG_CHOICES = ["English", "Deutsch", "Français"]
+    LANG_CODE = {"English": "en", "Deutsch": "de", "Français": "fr"}
+
+    UI_STR = {
+        "en": {
+            "LANGUAGE": "LANGUAGE",
+            "PATTERN ORDER": "PATTERN ORDER",
+            "SMART": "SMART",
+            "BASE MELODY": "BASE MELODY",
+            "MELODY DERIVATION": "MELODY DERIVATION",
+            "BASE KEY (optional)": "BASE KEY (optional)",
+            "SPEED": "SPEED",
+            "TEMPO": "TEMPO",
+            "SCALE MODE": "SCALE MODE",
+            "VARIATION": "VARIATION",
+            "SEED (optional)": "SEED (optional)",
+            "RND": "RND",
+            "BATCH": "BATCH",
+            "MUTE CH": "MUTE CH",
+            "STEREO %": "STEREO %",
+            "Enable slowdown to the end of the song": "Enable slowdown to the end of the song",
+            "Export rendered songs as WAV": "Export rendered songs as WAV",
+            "Save song parameters": "Save song parameters",
+            "Disable vibrato in samples": "Disable vibrato in samples",
+            "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
+            "GENERATE": "GENERATE",
+            "PLAY": "PLAY",
+            "STOP": "STOP",
+            "OPEN OUTPUT": "OPEN OUTPUT",
+            "OPEN PLUGINS": "OPEN PLUGINS",
+            "REFRESH": "REFRESH",
+            "ADD AS PLUGIN": "ADD AS PLUGIN",
+            "SPECTRUM ANALYZER": "SPECTRUM ANALYZER",
+            "CHANNEL SCOPES": "CHANNEL SCOPES",
+            "Click visualizer to toggle Spectrum / Scopes": "Click visualizer to toggle Spectrum / Scopes",
+            "PATTERN PREVIEW": "PATTERN PREVIEW",
+            "Generate a song, then hit PLAY.": "Generate a song, then hit PLAY.",
+        },
+        "de": {
+            "LANGUAGE": "SPRACHE",
+            "PATTERN ORDER": "PATTERN-REIHENFOLGE",
+            "SMART": "SMART",
+            "BASE MELODY": "BASISMELODIE",
+            "MELODY DERIVATION": "MELODIE-ABLEITUNG",
+            "BASE KEY (optional)": "BASISTONART (optional)",
+            "SPEED": "GESCHWINDIGKEIT",
+            "TEMPO": "TEMPO",
+            "SCALE MODE": "TONART/MODUS",
+            "VARIATION": "VARIATION",
+            "SEED (optional)": "SEED (optional)",
+            "RND": "ZUFALL",
+            "BATCH": "STAPEL",
+            "MUTE CH": "MUTE KANÄLE",
+            "STEREO %": "STEREO %",
+            "Enable slowdown to the end of the song": "Verlangsamung bis zum Songende",
+            "Export rendered songs as WAV": "Gerenderte Songs als WAV exportieren",
+            "Save song parameters": "Song-Parameter speichern",
+            "Disable vibrato in samples": "Vibrato in Samples deaktivieren",
+            "INSTRUMENTS (CH1..CH4)": "INSTRUMENTE (CH1..CH4)",
+            "GENERATE": "GENERIEREN",
+            "PLAY": "ABSPIELEN",
+            "STOP": "STOP",
+            "OPEN OUTPUT": "AUSGABE ÖFFNEN",
+            "OPEN PLUGINS": "PLUGINS ÖFFNEN",
+            "REFRESH": "AKTUALISIEREN",
+            "ADD AS PLUGIN": "ALS PLUGIN HINZUFÜGEN",
+            "SPECTRUM ANALYZER": "SPEKTRUM-ANALYSATOR",
+            "CHANNEL SCOPES": "KANAL-OSZILLOSCOPE",
+            "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: Spektrum / Scopes",
+            "PATTERN PREVIEW": "PATTERN-VORSCHAU",
+            "Generate a song, then hit PLAY.": "Song generieren, dann PLAY drücken.",
+        },
+        "fr": {
+            "LANGUAGE": "LANGUE",
+            "PATTERN ORDER": "ORDRE DES PATTERNS",
+            "SMART": "SMART",
+            "BASE MELODY": "MÉLODIE DE BASE",
+            "MELODY DERIVATION": "DÉRIVATION",
+            "BASE KEY (optional)": "TONALITÉ (optionnel)",
+            "SPEED": "VITESSE",
+            "TEMPO": "TEMPO",
+            "SCALE MODE": "MODE GAMME",
+            "VARIATION": "VARIATION",
+            "SEED (optional)": "GRAINE (optionnel)",
+            "RND": "ALÉA",
+            "BATCH": "LOT",
+            "MUTE CH": "MUET CH",
+            "STEREO %": "STÉRÉO %",
+            "Enable slowdown to the end of the song": "Ralentir jusqu'à la fin",
+            "Export rendered songs as WAV": "Exporter en WAV",
+            "Save song parameters": "Sauver les paramètres",
+            "Disable vibrato in samples": "Désactiver le vibrato",
+            "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
+            "GENERATE": "GÉNÉRER",
+            "PLAY": "JOUER",
+            "STOP": "STOP",
+            "OPEN OUTPUT": "OUVRIR SORTIE",
+            "OPEN PLUGINS": "OUVRIR PLUGINS",
+            "REFRESH": "RAFRAÎCHIR",
+            "ADD AS PLUGIN": "AJOUTER COMME PLUGIN",
+            "SPECTRUM ANALYZER": "ANALYSEUR DE SPECTRE",
+            "CHANNEL SCOPES": "OSCILLOSCOPES",
+            "Click visualizer to toggle Spectrum / Scopes": "Cliquer: Spectre / Oscillos",
+            "PATTERN PREVIEW": "APERÇU PATTERN",
+            "Generate a song, then hit PLAY.": "Générez un morceau, puis PLAY.",
+        },
+    }
+
+    TT_STR = {
+        "en": {
+            "LANGUAGE": "Select the UI language (labels + tooltips).",
+            "Click visualizer to toggle Spectrum / Scopes": "Click the visualizer to switch between Spectrum and Channel Scopes.",
+            "PATTERN ORDER": "Pattern playback order. You can type or pick a preset.",
+            "SMART": "Generate a musically sensible order automatically.",
+            "BASE MELODY": "Choose a base melody plugin. 'Pure Random' uses algorithmic melody.",
+            "MELODY DERIVATION": "How strongly the base melody is transformed: Near / Far / Random.",
+            "BASE KEY (optional)": "Optional song key root (e.g. C-2, F#-2, Bb-2). Leave empty for random.",
+            "SPEED": "MOD speed (ticks per row). Typical: 6.",
+            "TEMPO": "MOD tempo (BPM). Typical: 125.",
+            "SCALE MODE": "Auto uses plugin 'mode' meta. Or force Major/Minor/etc.",
+            "VARIATION": "Overall variation amount: higher = more drive/ornaments.",
+            "SEED (optional)": "Seed for reproducible generation. Same seed = same song.",
+            "BATCH": "Generate multiple songs in one run (seeds count up).",
+            "MUTE CH": "Mute channels in preview rendering.",
+            "STEREO %": "Stereo width for preview rendering.",
+            "Enable slowdown to the end of the song": "Apply a slowdown effect only at the very end.",
+            "Export rendered songs as WAV": "Save preview rendering as .wav next to the .mod.",
+            "Save song parameters": "Save song parameters as .txt next to the .mod.",
+            "Disable vibrato in samples": "Disable vibrato in synthesized instruments (more stable pitch).",
+            "GENERATE": "Generate a new .mod using the current settings.",
+            "PLAY": "Render preview audio and play it.",
+            "STOP": "Stop playback.",
+            "OPEN OUTPUT": "Open the output folder (mods_out).",
+            "OPEN PLUGINS": "Open the melody plugin folder (melody_plugins).",
+            "REFRESH": "Reload melody plugins from disk.",
+            "ADD AS PLUGIN": "Export the last generated song as a new melody plugin folder.",
+            "PATTERN PREVIEW": "Preview patterns as tracker-like text. Select pattern number.",
+        },
+        "de": {
+            "LANGUAGE": "GUI-Sprache auswählen (Labels + Tooltips).",
+            "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: zwischen Spektrum und Kanal-Scopes umschalten.",
+            "PATTERN ORDER": "Pattern-Abspielreihenfolge. Du kannst tippen oder ein Preset wählen.",
+            "SMART": "Erzeugt automatisch eine musikalisch sinnvolle Reihenfolge.",
+            "BASE MELODY": "Basismelodie wählen. 'Pure Random' erzeugt die Melodie algorithmisch.",
+            "MELODY DERIVATION": "Wie stark die Basismelodie verändert wird: Near / Far / Random.",
+            "BASE KEY (optional)": "Optionale Tonart (z.B. C-2, F#-2, Bb-2). Leer = Zufall.",
+            "SPEED": "MOD-Speed (Ticks pro Zeile). Typisch: 6.",
+            "TEMPO": "MOD-Tempo (BPM). Typisch: 125.",
+            "SCALE MODE": "Auto nutzt Plugin-Meta 'mode'. Oder Major/Minor/etc erzwingen.",
+            "VARIATION": "Variationsstärke: höher = mehr Drive/Ornamente.",
+            "SEED (optional)": "Seed für reproduzierbare Generierung. Gleicher Seed = gleicher Song.",
+            "BATCH": "Mehrere Songs in einem Lauf generieren (Seeds zählen hoch).",
+            "MUTE CH": "Kanäle im Preview stummschalten.",
+            "STEREO %": "Stereo-Breite für den Preview-Render.",
+            "Enable slowdown to the end of the song": "Verlangsamung nur ganz am Ende anwenden.",
+            "Export rendered songs as WAV": "Preview als .wav neben der .mod speichern.",
+            "Save song parameters": "Song-Parameter als .txt neben der .mod speichern.",
+            "Disable vibrato in samples": "Vibrato in Synth-Instrumenten deaktivieren (stabilere Tonhöhe).",
+            "GENERATE": "Erzeugt eine neue .mod Datei mit den aktuellen Einstellungen.",
+            "PLAY": "Preview rendern und abspielen.",
+            "STOP": "Playback stoppen.",
+            "OPEN OUTPUT": "Ausgabeordner öffnen (mods_out).",
+            "OPEN PLUGINS": "Plugin-Ordner öffnen (melody_plugins).",
+            "REFRESH": "Plugins neu einlesen.",
+            "ADD AS PLUGIN": "Letzten Song als neues Plugin exportieren.",
+            "PATTERN PREVIEW": "Pattern-Vorschau (Tracker-Text). Pattern auswählen.",
+        },
+        "fr": {
+            "LANGUAGE": "Choisir la langue (libellés + info-bulles).",
+            "Click visualizer to toggle Spectrum / Scopes": "Cliquer pour basculer Spectre / Oscilloscope.",
+            "PATTERN ORDER": "Ordre de lecture des patterns. Saisir ou choisir un preset.",
+            "SMART": "Génère automatiquement un ordre musical cohérent.",
+            "BASE MELODY": "Choisir une mélodie plugin. 'Pure Random' = mélodie algorithmique.",
+            "MELODY DERIVATION": "Transformation: Near / Far / Random.",
+            "BASE KEY (optional)": "Tonalité (ex: C-2, F#-2, Bb-2). Vide = aléatoire.",
+            "SPEED": "Vitesse MOD (ticks/ligne). Typique: 6.",
+            "TEMPO": "Tempo MOD (BPM). Typique: 125.",
+            "SCALE MODE": "Auto utilise le meta 'mode'. Ou forcer Major/Minor/etc.",
+            "VARIATION": "Variation: plus élevé = plus d'ornements/drive.",
+            "SEED (optional)": "Graine reproductible. Même graine = même morceau.",
+            "BATCH": "Générer plusieurs morceaux (seed incrémenté).",
+            "MUTE CH": "Couper des canaux dans l'aperçu.",
+            "STEREO %": "Largeur stéréo de l'aperçu.",
+            "Enable slowdown to the end of the song": "Ralentir uniquement à la toute fin.",
+            "Export rendered songs as WAV": "Enregistrer l'aperçu en .wav à côté du .mod.",
+            "Save song parameters": "Enregistrer les paramètres en .txt à côté du .mod.",
+            "Disable vibrato in samples": "Désactiver le vibrato (hauteur plus stable).",
+            "GENERATE": "Générer un nouveau .mod avec les réglages actuels.",
+            "PLAY": "Rendre l'aperçu audio et le lire.",
+            "STOP": "Arrêter la lecture.",
+            "OPEN OUTPUT": "Ouvrir le dossier de sortie (mods_out).",
+            "OPEN PLUGINS": "Ouvrir le dossier plugins (melody_plugins).",
+            "REFRESH": "Recharger les plugins.",
+            "ADD AS PLUGIN": "Exporter le dernier morceau comme plugin.",
+            "PATTERN PREVIEW": "Aperçu des patterns (texte tracker).",
+        },
+    }
+
+    _cur_lang = {"code": "en"}
+    lang_var = tk.StringVar(value="English")
+    _i18n_bind: list[tuple[object, str]] = []  # (widget, key)
+
+    def tr(key: str) -> str:
+        code = _cur_lang["code"]
+        return UI_STR.get(code, UI_STR["en"]).get(key, UI_STR["en"].get(key, key))
+
+    def tt(key: str) -> str:
+        code = _cur_lang["code"]
+        return TT_STR.get(code, TT_STR["en"]).get(key, TT_STR["en"].get(key, ""))
+
+    class TooltipManager:
+        def __init__(self, root_: tk.Tk, delay_ms: int = 1000):
+            self.root = root_
+            self.delay_ms = delay_ms
+            self._after = None
+            self._tip = None
+            self._key = None
+
+        def bind(self, widget, key: str):
+            widget.bind("<Enter>", lambda e, w=widget, k=key: self._schedule(w, k))
+            widget.bind("<Leave>", lambda e: self._hide())
+            widget.bind("<ButtonPress>", lambda e: self._hide())
+
+        def _schedule(self, widget, key: str):
+            self._hide()
+            self._key = key
+            self._after = widget.after(self.delay_ms, lambda: self._show(widget))
+
+        def _show(self, widget):
+            try:
+                text_ = tt(self._key or "")
+                if not text_:
+                    return
+                x = widget.winfo_rootx() + 10
+                y = widget.winfo_rooty() + widget.winfo_height() + 8
+                self._tip = tk.Toplevel(widget)
+                self._tip.wm_overrideredirect(True)
+                self._tip.wm_geometry(f"+{x}+{y}")
+                lbl = tk.Label(self._tip, text=text_, justify="left", wraplength=340,
+                               bg="#ffffe0", fg="#000000", bd=1, relief="solid",
+                               font=("Segoe UI", 9))
+                lbl.pack(ipadx=6, ipady=4)
+            except Exception:
+                pass
+
+        def _hide(self):
+            try:
+                if self._after is not None:
+                    try:
+                        self.root.after_cancel(self._after)
+                    except Exception:
+                        pass
+            finally:
+                self._after = None
+            try:
+                if self._tip is not None:
+                    self._tip.destroy()
+            except Exception:
+                pass
+            self._tip = None
+
+    tips = TooltipManager(root, delay_ms=1000)
+
+    def _bind_i18n(widget, key: str):
+        _i18n_bind.append((widget, key))
+
+    def apply_language():
+        # Update all registered widgets' displayed text.
+        for w, key in list(_i18n_bind):
+            try:
+                w.configure(text=tr(key))
+            except Exception:
+                pass
+
     # --- left controls ---
-    def pt_label(parent, text_):
-        return ttk.Label(parent, text=text_, style="PT.TLabel")
+    def pt_label(parent, key: str):
+        w = ttk.Label(parent, text=tr(key), style="PT.TLabel")
+        _bind_i18n(w, key)
+        return w
 
     def _open_folder(path: Path):
         p = Path(path).resolve()
@@ -3342,48 +3683,61 @@ def run_gui():
         # Use seed if provided for reproducibility.
         try:
             s = seed_var.get().strip()
-            base_seed = int(s) if s else int(time.time() * 1000)
+            base_seed = int(s) if s else random_seed_value()
         except Exception:
-            base_seed = int(time.time() * 1000)
+            base_seed = random_seed_value()
         rr = random.Random(base_seed ^ 0xA5A5)
         return ", ".join(str(x) for x in generate_smart_order(rr, n_patterns=PATTERN_COUNT))
 
-    smart_btn = ttk.Button(left, text="SMART", style="PT.TButton", command=lambda: order_var.set(_smart_order_generate()))
+    smart_btn = ttk.Button(left, text=tr("SMART"), style="PT.TButton", command=lambda: order_var.set(_smart_order_generate()))
+    _bind_i18n(smart_btn, "SMART")
+    tips.bind(smart_btn, "SMART")
     smart_btn.grid(row=0, column=1, sticky="e", padx=8, pady=(8, 2))
 
     order_var = tk.StringVar(value=DEFAULT_ORDER_STR)
     order_combo = ttk.Combobox(left, textvariable=order_var, values=ORDER_PRESETS, width=32, style="PT.TCombobox", state="normal")
     order_combo.grid(row=1, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
+    tips.bind(order_combo, "PATTERN ORDER")
 
     pt_label(left, "BASE MELODY").grid(row=2, column=0, columnspan=2, sticky="w", padx=8)
     melody_var = tk.StringVar(value="Pure Random")
     melody_combo = ttk.Combobox(left, textvariable=melody_var, values=MELODY_CHOICES, width=32, style="PT.TCombobox", state="readonly")
     melody_combo.grid(row=3, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
+    tips.bind(melody_combo, "BASE MELODY")
 
     pt_label(left, "MELODY DERIVATION").grid(row=4, column=0, columnspan=2, sticky="w", padx=8)
     derive_var = tk.StringVar(value="Random")
     derive_combo = ttk.Combobox(left, textvariable=derive_var, values=["Random", "Near", "Far"], width=32, style="PT.TCombobox", state="readonly")
     derive_combo.grid(row=5, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 8))
+    tips.bind(derive_combo, "MELODY DERIVATION")
 
     pt_label(left, "BASE KEY (optional)").grid(row=6, column=0, sticky="w", padx=8)
-    key_var = tk.StringVar(value="")
-    key_entry = tk.Entry(left, textvariable=key_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    key_entry.grid(row=6, column=1, sticky="e", padx=8, pady=2)
-
-    # Advanced options (kept in a compact panel to avoid clutter)
+    key_var = tk.StringVar(value="C-2")
+    key_row = tk.Frame(left, bg="#8f8f8f")
+    key_row.grid(row=6, column=1, sticky="e", padx=8, pady=2)
+    key_entry = tk.Entry(key_row, textvariable=key_var, width=8, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
+    key_entry.pack(side="left")
+    tips.bind(key_entry, "BASE KEY (optional)")
+    rnd_key_btn = ttk.Button(key_row, text=tr("RND"), style="PT.TButton", command=lambda: key_var.set(random_key_root()))
+    _bind_i18n(rnd_key_btn, "RND")
+    rnd_key_btn.pack(side="left", padx=(6, 0))
+    tips.bind(rnd_key_btn, "BASE KEY (optional)")
+# Advanced options (kept in a compact panel to avoid clutter)
     adv = tk.Frame(left, bg="#8f8f8f", bd=2, relief="ridge")
     adv.grid(row=9, column=0, columnspan=2, sticky="we", padx=8, pady=(6, 10))
     adv.columnconfigure(1, weight=1)
 
     pt_label(adv, "SCALE MODE").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
-    scale_mode_var = tk.StringVar(value="Auto")
+    scale_mode_var = tk.StringVar(value="Major")
     scale_combo = ttk.Combobox(adv, textvariable=scale_mode_var, values=SCALE_MODE_CHOICES, width=14, style="PT.TCombobox", state="readonly")
     scale_combo.grid(row=0, column=1, sticky="e", padx=6, pady=(6, 2))
+    tips.bind(scale_combo, "SCALE MODE")
 
     pt_label(adv, "VARIATION").grid(row=1, column=0, sticky="w", padx=6, pady=(2, 2))
     variation_var = tk.IntVar(value=65)
     variation_scale = tk.Scale(adv, from_=0, to=100, orient="horizontal", variable=variation_var, length=180, bg="#8f8f8f", highlightthickness=0)
     variation_scale.grid(row=1, column=1, sticky="e", padx=6, pady=(2, 2))
+    tips.bind(variation_scale, "VARIATION")
 
     pt_label(adv, "SEED (optional)").grid(row=2, column=0, sticky="w", padx=6, pady=(2, 2))
     seed_var = tk.StringVar(value="")
@@ -3391,24 +3745,32 @@ def run_gui():
     seed_row.grid(row=2, column=1, sticky="e", padx=6, pady=(2, 2))
     seed_entry = tk.Entry(seed_row, textvariable=seed_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     seed_entry.pack(side="left")
-    ttk.Button(seed_row, text="RND", style="PT.TButton", command=lambda: seed_var.set(str(int(time.time()*1000) ^ (os.getpid()<<8)))).pack(side="left", padx=(6, 0))
+    tips.bind(seed_entry, "SEED (optional)")
+    rnd_seed_btn = ttk.Button(seed_row, text=tr("RND"), style="PT.TButton", command=lambda: seed_var.set(str(random_seed_value())))
+    _bind_i18n(rnd_seed_btn, "RND")
+    rnd_seed_btn.pack(side="left", padx=(6, 0))
+    tips.bind(rnd_seed_btn, "SEED (optional)")
 
     pt_label(adv, "BATCH").grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
     batch_var = tk.IntVar(value=1)
     batch_spin = tk.Spinbox(adv, from_=1, to=50, textvariable=batch_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     batch_spin.grid(row=3, column=1, sticky="e", padx=6, pady=(2, 6))
+    tips.bind(batch_spin, "BATCH")
 
     pt_label(adv, "MUTE CH").grid(row=4, column=0, sticky="w", padx=6, pady=(2, 6))
     mute_vars = [tk.BooleanVar(value=False) for _ in range(4)]
     mute_row = tk.Frame(adv, bg="#8f8f8f")
     mute_row.grid(row=4, column=1, sticky="e", padx=6, pady=(2, 6))
     for i in range(4):
-        ttk.Checkbutton(mute_row, text=f"{i+1}", variable=mute_vars[i], style="PT.TCheckbutton").pack(side="left")
+        cb = ttk.Checkbutton(mute_row, text=f"{i+1}", variable=mute_vars[i], style="PT.TCheckbutton")
+        cb.pack(side="left")
+        tips.bind(cb, "MUTE CH")
 
     pt_label(adv, "STEREO %").grid(row=5, column=0, sticky="w", padx=6, pady=(0, 6))
     width_var = tk.IntVar(value=100)
     width_scale = tk.Scale(adv, from_=0, to=200, orient="horizontal", variable=width_var, length=180, bg="#8f8f8f", highlightthickness=0)
     width_scale.grid(row=5, column=1, sticky="e", padx=6, pady=(0, 6))
+    tips.bind(width_scale, "STEREO %")
 
 
 
@@ -3416,27 +3778,37 @@ def run_gui():
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
     speed_entry = tk.Entry(left, textvariable=speed_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     speed_entry.grid(row=7, column=1, sticky="e", padx=8, pady=2)
+    tips.bind(speed_entry, "SPEED")
 
     pt_label(left, "TEMPO").grid(row=8, column=0, sticky="w", padx=8)
     tempo_var = tk.StringVar(value=str(DEFAULT_TEMPO))
     tempo_entry = tk.Entry(left, textvariable=tempo_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     tempo_entry.grid(row=8, column=1, sticky="e", padx=8, pady=2)
+    tips.bind(tempo_entry, "TEMPO")
 
     slowdown_var = tk.BooleanVar(value=False)
-    slowdown_cb = ttk.Checkbutton(left, text="Enable slowdown to the end of the song", variable=slowdown_var, style="PT.TCheckbutton")
+    slowdown_cb = ttk.Checkbutton(left, text=tr("Enable slowdown to the end of the song"), variable=slowdown_var, style="PT.TCheckbutton")
+    _bind_i18n(slowdown_cb, "Enable slowdown to the end of the song")
     slowdown_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
+    tips.bind(slowdown_cb, "Enable slowdown to the end of the song")
 
     # These two exports are useful defaults in practice.
     export_wav_var = tk.BooleanVar(value=True)
-    export_wav_cb = ttk.Checkbutton(left, text="Export rendered songs as WAV", variable=export_wav_var, style="PT.TCheckbutton")
+    export_wav_cb = ttk.Checkbutton(left, text=tr("Export rendered songs as WAV"), variable=export_wav_var, style="PT.TCheckbutton")
+    _bind_i18n(export_wav_cb, "Export rendered songs as WAV")
     export_wav_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    tips.bind(export_wav_cb, "Export rendered songs as WAV")
 
     save_params_var = tk.BooleanVar(value=True)
-    save_params_cb = ttk.Checkbutton(left, text="Save song parameters", variable=save_params_var, style="PT.TCheckbutton")
+    save_params_cb = ttk.Checkbutton(left, text=tr("Save song parameters"), variable=save_params_var, style="PT.TCheckbutton")
+    _bind_i18n(save_params_cb, "Save song parameters")
     save_params_cb.grid(row=12, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
+    tips.bind(save_params_cb, "Save song parameters")
     vibrato_var = tk.BooleanVar(value=False)
-    vibrato_cb = ttk.Checkbutton(left, text="Disable vibrato in samples", variable=vibrato_var, style="PT.TCheckbutton")
+    vibrato_cb = ttk.Checkbutton(left, text=tr("Disable vibrato in samples"), variable=vibrato_var, style="PT.TCheckbutton")
+    _bind_i18n(vibrato_cb, "Disable vibrato in samples")
     vibrato_cb.grid(row=13, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
+    tips.bind(vibrato_cb, "Disable vibrato in samples")
 
 
     pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=14, column=0, sticky="w", padx=8)
@@ -3465,8 +3837,10 @@ def run_gui():
             except Exception:
                 pass
 
-    rnd_inst_btn = ttk.Button(left, text="RND", style="PT.TButton", command=_randomize_instruments)
+    rnd_inst_btn = ttk.Button(left, text=tr("RND"), style="PT.TButton", command=_randomize_instruments)
+    _bind_i18n(rnd_inst_btn, "RND")
     rnd_inst_btn.grid(row=14, column=1, sticky="e", padx=8)
+    tips.bind(rnd_inst_btn, "INSTRUMENTS (CH1..CH4)")
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
 
@@ -3474,11 +3848,40 @@ def run_gui():
         pt_label(left, label).grid(row=r, column=0, sticky="w", padx=8, pady=2)
         cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
         cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
+        tips.bind(cb, "INSTRUMENTS (CH1..CH4)")
 
     add_inst_row(15, "CH1", inst_vars[0])
     add_inst_row(16, "CH2", inst_vars[1])
     add_inst_row(17, "CH3", inst_vars[2])
     add_inst_row(18, "CH4", inst_vars[3])
+
+    # Language selector (affects labels + tooltips)
+    pt_label(left, "LANGUAGE").grid(row=19, column=0, sticky="w", padx=8, pady=(10, 2))
+    lang_combo = ttk.Combobox(left, textvariable=lang_var, values=LANG_CHOICES, width=14, style="PT.TCombobox", state="readonly")
+    lang_combo.grid(row=19, column=1, sticky="e", padx=8, pady=(10, 2))
+    tips.bind(lang_combo, "LANGUAGE")
+
+    def _on_lang_change(_evt=None):
+        _cur_lang["code"] = LANG_CODE.get(lang_var.get(), "en")
+        apply_language()
+        # Update a few non-ttk labels/vars (best effort)
+        try:
+            hint_lbl.configure(text=tr("Click visualizer to toggle Spectrum / Scopes"))
+        except Exception:
+            pass
+        try:
+            patt_title.configure(text=tr("PATTERN PREVIEW"))
+        except Exception:
+            pass
+        try:
+            if viz_mode == "spectrum":
+                viz_title_var.set(tr("SPECTRUM ANALYZER"))
+            else:
+                viz_title_var.set(tr("CHANNEL SCOPES"))
+        except Exception:
+            pass
+
+    lang_combo.bind("<<ComboboxSelected>>", _on_lang_change)
 
     # Keep the left panel compact; song details are written to the log on the right.
 
@@ -3486,23 +3889,37 @@ def run_gui():
     btn_frame = tk.Frame(left, bg="#8f8f8f")
     btn_frame.grid(row=20, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
-    gen_btn = ttk.Button(btn_frame, text="GENERATE", style="PT.TButton")
-    play_btn = ttk.Button(btn_frame, text="PLAY", style="PT.TButton")
-    stop_btn = ttk.Button(btn_frame, text="STOP", style="PT.TButton")
+    gen_btn = ttk.Button(btn_frame, text=tr("GENERATE"), style="PT.TButton")
+    play_btn = ttk.Button(btn_frame, text=tr("PLAY"), style="PT.TButton")
+    stop_btn = ttk.Button(btn_frame, text=tr("STOP"), style="PT.TButton")
+    _bind_i18n(gen_btn, "GENERATE")
+    _bind_i18n(play_btn, "PLAY")
+    _bind_i18n(stop_btn, "STOP")
+    tips.bind(gen_btn, "GENERATE")
+    tips.bind(play_btn, "PLAY")
+    tips.bind(stop_btn, "STOP")
 
     gen_btn.grid(row=0, column=0, sticky="we", padx=(0, 6))
     play_btn.grid(row=0, column=1, sticky="we", padx=(0, 6))
     stop_btn.grid(row=0, column=2, sticky="we")
 
-    open_out_btn = ttk.Button(btn_frame, text="OPEN OUTPUT", style="PT.TButton", command=_open_output_folder)
-    open_plg_btn = ttk.Button(btn_frame, text="OPEN PLUGINS", style="PT.TButton", command=_open_plugin_folder)
-    refresh_plg_btn = ttk.Button(btn_frame, text="REFRESH", style="PT.TButton", command=_refresh_plugins)
+    open_out_btn = ttk.Button(btn_frame, text=tr("OPEN OUTPUT"), style="PT.TButton", command=_open_output_folder)
+    open_plg_btn = ttk.Button(btn_frame, text=tr("OPEN PLUGINS"), style="PT.TButton", command=_open_plugin_folder)
+    refresh_plg_btn = ttk.Button(btn_frame, text=tr("REFRESH"), style="PT.TButton", command=_refresh_plugins)
+    _bind_i18n(open_out_btn, "OPEN OUTPUT")
+    _bind_i18n(open_plg_btn, "OPEN PLUGINS")
+    _bind_i18n(refresh_plg_btn, "REFRESH")
+    tips.bind(open_out_btn, "OPEN OUTPUT")
+    tips.bind(open_plg_btn, "OPEN PLUGINS")
+    tips.bind(refresh_plg_btn, "REFRESH")
 
     open_out_btn.grid(row=1, column=0, sticky="we", padx=(0, 6), pady=(6, 0))
     open_plg_btn.grid(row=1, column=1, sticky="we", padx=(0, 6), pady=(6, 0))
     refresh_plg_btn.grid(row=1, column=2, sticky="we", pady=(6, 0))
 
-    add_plg_btn = ttk.Button(btn_frame, text="ADD AS PLUGIN", style="PT.TButton", command=_add_last_as_plugin)
+    add_plg_btn = ttk.Button(btn_frame, text=tr("ADD AS PLUGIN"), style="PT.TButton", command=_add_last_as_plugin)
+    _bind_i18n(add_plg_btn, "ADD AS PLUGIN")
+    tips.bind(add_plg_btn, "ADD AS PLUGIN")
     add_plg_btn.grid(row=2, column=0, columnspan=3, sticky="we", pady=(6, 0))
 
     # initial states
@@ -3522,15 +3939,16 @@ def run_gui():
     title_bar = tk.Frame(right, bg="#8f8f8f")
     title_bar.pack(fill="x", padx=10, pady=(10, 2))
 
-    viz_title_var = tk.StringVar(value="SPECTRUM ANALYZER")
+    viz_title_var = tk.StringVar(value=tr("SPECTRUM ANALYZER"))
     viz_title_lbl = tk.Label(title_bar, textvariable=viz_title_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
     viz_title_lbl.pack(anchor="w")
 
-    hint_lbl = tk.Label(title_bar, text="Click visualizer to toggle Spectrum / Scopes", bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 12, "bold"))
+    hint_lbl = tk.Label(title_bar, text=tr("Click visualizer to toggle Spectrum / Scopes"), bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 12, "bold"))
     hint_lbl.pack(anchor="w")
 
     canvas = tk.Canvas(right)
     canvas.pack(fill="x", padx=10, pady=(0, 10))
+    tips.bind(canvas, "Click visualizer to toggle Spectrum / Scopes")
 
     viz_mode = "spectrum"  # spectrum | scope
     viz_view = None
@@ -3546,10 +3964,10 @@ def run_gui():
         except Exception:
             pass
         if viz_mode == "spectrum":
-            viz_title_var.set("SPECTRUM ANALYZER")
+            viz_title_var.set(tr("SPECTRUM ANALYZER"))
             viz_view = SpectrumAnalyzer(canvas, bars=32, width=560, height=160, segments=22)
         else:
-            viz_title_var.set("CHANNEL SCOPES")
+            viz_title_var.set(tr("CHANNEL SCOPES"))
             viz_view = OscilloscopeView(canvas, width=560, height=160)
         try:
             viz_view.reset()
@@ -3583,16 +4001,17 @@ def run_gui():
 
     info_txt = tk.Text(info_bar, height=7, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
     info_txt.grid(row=1, column=0, sticky="nsew")
-    info_txt.insert("end", "Generate a song, then hit PLAY.\n")
+    info_txt.insert("end", tr("Generate a song, then hit PLAY.") + "\n")
     # --- pattern preview (scrollable tracker grid) ---
     patt_header = tk.Frame(info_bar, bg="#8f8f8f")
     patt_header.grid(row=2, column=0, sticky="we", pady=(10, 2))
-    patt_title = tk.Label(patt_header, text="PATTERN PREVIEW", bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
+    patt_title = tk.Label(patt_header, text=tr("PATTERN PREVIEW"), bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
     patt_title.pack(side="left")
 
     patt_sel_var = tk.StringVar(value="0")
     patt_combo = ttk.Combobox(patt_header, textvariable=patt_sel_var, values=["0"], width=6, style="PT.TCombobox", state="readonly")
     patt_combo.pack(side="left", padx=(12, 0))
+    tips.bind(patt_combo, "PATTERN PREVIEW")
 
     patt_frame = tk.Frame(info_bar, bg="#8f8f8f")
     patt_frame.grid(row=3, column=0, sticky="nsew")
