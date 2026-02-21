@@ -1,0 +1,4 @@
+name: Brahms' Lullaby
+origin: Public domain
+mode: major
+tempo_hint: 80

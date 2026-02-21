@@ -1,0 +1,4 @@
+name: Au clair de la lune
+origin: Traditional
+mode: major
+tempo_hint: 90

@@ -1,0 +1,20 @@
+name: Auld Lang Syne (trad.)
+mode: major
+tempo_min: 80
+tempo_max: 130
+tags: folk
+# format: DEG OCT DUR
+4 0 2
+0 0 2
+0 0 2
+2 0 2
+1 0 2
+0 0 2
+1 0 2
+2 0 2
+4 0 2
+0 0 2
+0 0 2
+2 0 2
+1 0 4
+R 0 2

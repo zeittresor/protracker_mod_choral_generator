@@ -1,0 +1,4 @@
+name: Greensleeves
+origin: Traditional (public domain)
+mode: minor
+tempo_hint: 90

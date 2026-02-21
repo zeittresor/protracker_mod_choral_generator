@@ -1,0 +1,4 @@
+name: Oh! Susanna
+origin: Public domain (19th century)
+mode: major
+tempo_hint: 120

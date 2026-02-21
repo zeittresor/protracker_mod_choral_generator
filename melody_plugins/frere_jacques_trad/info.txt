@@ -1,0 +1,4 @@
+name: Frère Jacques
+origin: Traditional
+mode: major
+tempo_hint: 120

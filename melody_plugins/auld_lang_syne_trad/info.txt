@@ -1,0 +1,4 @@
+name: Auld Lang Syne
+origin: Traditional
+mode: major
+tempo_hint: 100
