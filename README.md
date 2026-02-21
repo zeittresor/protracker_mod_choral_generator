@@ -17,6 +17,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <img width="1277" height="960" alt="1784" src="https://github.com/user-attachments/assets/7972a877-b40e-4670-a7e5-b39212e1dbe8" />
 
+https://github.com/user-attachments/assets/4682c9cb-2307-4253-9b9e-a9f44ea215d5
+
 <i><b>New in Commit c65a690 (21.02.2026 v1.7.5):</b></i>
 
 - Major changes with additional features, tooltips, languages, plugins, instruments, options..
