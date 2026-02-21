@@ -7,13 +7,12 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit 705b8fd (latest / 21.02.2026 v1.7.3):</b></i>
+<i><b>New in Commit c65a690 (latest / 21.02.2026 v1.7.5):</b></i>
 
 - Major changes with additional features, tooltips, languages, plugins, instruments, options..
 - Bug fixes
 
-<img width="1044" height="916" alt="173" src="https://github.com/user-attachments/assets/3d177da7-b383-456f-b74d-985c52426b62" />
-
+<img width="1043" height="935" alt="175" src="https://github.com/user-attachments/assets/57d22303-1bc4-4ea1-840d-595cdaa52d8e" />
 
 <i><b>New in Commit 88944e6 (19.02.2026 v1.6.6):</b></i>
 
