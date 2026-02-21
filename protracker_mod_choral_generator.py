@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.7.3)
+# ProTracker MOD Choral Generator (v1.7.5)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -85,7 +85,8 @@ def random_seed_value() -> int:
 DEFAULT_SPEED = 6
 DEFAULT_TEMPO = 125
 
-SCALE_MODE_CHOICES = ["Auto", "Major", "Minor", "Dorian", "Mixolydian"]
+# "Mixed" blends Major+Minor (modal mixture) while keeping everything harmonically aligned.
+SCALE_MODE_CHOICES = ["Auto", "Major", "Minor", "Mixed", "Dorian", "Mixolydian"]
 
 DEFAULT_ORDER_STR = "5, 5, 1, 5, 10, 3, 4, 2, 5, 0"
 
@@ -1188,7 +1189,7 @@ def scale_from_mode(root_note: str, mode: str | None) -> list[str]:
         intervals = [0, 2, 3, 5, 7, 8, 10]
     elif m.startswith("dor"):
         intervals = [0, 2, 3, 5, 7, 9, 10]
-    elif m.startswith("mix"):
+    elif m.startswith("mixo"):
         intervals = [0, 2, 4, 5, 7, 9, 10]
     else:
         intervals = [0, 2, 4, 5, 7, 9, 11]
@@ -1553,8 +1554,20 @@ def make_patterns(
     if sm in ('auto', 'random'):
         pm = str((base_meta or {}).get('mode', '') or '').strip().lower()
         sm = pm if pm else 'major'
-    scale = scale_from_mode(key_root, sm)
-    scale_up = [note_shift(n, 12) for n in scale]
+
+    # "Mixed" = Major/Minor mixture. Keeps a stable home key but allows parallel borrowing.
+    use_mixed = (sm or '').strip().lower() == 'mixed'
+    if use_mixed:
+        scale = scale_from_mode(key_root, 'major')
+        scale_alt = scale_from_mode(key_root, 'minor')
+        scale_up = [note_shift(n, 12) for n in scale]
+        scale_alt_up = [note_shift(n, 12) for n in scale_alt]
+        sm = 'mixed'
+    else:
+        scale = scale_from_mode(key_root, sm)
+        scale_up = [note_shift(n, 12) for n in scale]
+        scale_alt = scale
+        scale_alt_up = scale_up
 
     if base_tpl is None:
         # Pure algorithmic base melody
@@ -1572,6 +1585,26 @@ def make_patterns(
     for _ in range(N_PAT):
         pat = [[(None, 0, 0, 0) for _ in range(NUM_CH)] for _ in range(ROWS)]
         patterns.append(pat)
+
+    # For "Mixed" tonalities we decide (per pattern/bar) whether to borrow from the parallel mode.
+    # This keeps the song coherent while adding color.
+    bar_use_alt: list[list[bool]] = [[False, False, False, False] for _ in range(N_PAT)]
+    if use_mixed:
+        v = float(variation)
+        if not (v == v):
+            v = 1.0
+        v = max(0.0, min(1.5, v))
+        base_prob = 0.18 + 0.22 * min(1.0, v)  # 0.18 .. 0.40
+        for p_idx in range(N_PAT):
+            for bar in range(4):
+                # Keep first and last bar "home" for stability.
+                if bar in (0, 3):
+                    continue
+                prob = base_prob
+                # Cadence-heavy patterns borrow less.
+                if p_idx in (5, 11, 19):
+                    prob *= 0.55
+                bar_use_alt[p_idx][bar] = (rng.random() < prob)
 
     def set_cell(p: int, row: int, ch: int, note: str | None = None, sample: int | None = None, effect: int = 0x00, param: int = 0x00):
         if note is None:
@@ -1656,9 +1689,13 @@ def make_patterns(
             r0 = bar * 16
             start_row = r0
 
+            use_alt = bool(use_mixed and bar_use_alt[p_idx][bar])
+            bar_scale = scale_alt if use_alt else scale
+            bar_scale_up = scale_alt_up if use_alt else scale_up
+
             if p_idx == 3:
                 bar_events = []
-                strong_note = scale_up[0]
+                strong_note = bar_scale_up[0]
             else:
                 mode = mode_for_pattern.get(p_idx, 'base')
                 # Variation strength: Near -> gentler; Far -> stronger
@@ -1667,20 +1704,20 @@ def make_patterns(
                     v = 1.0
                 v = max(0.0, min(1.5, v))
                 st = (0.70 + 0.55 * v) if dm.startswith('n') or dm.startswith('c') else (0.95 + 0.70 * v)
-                bar_events = _mutate_events(rng, base_bars[bar], scale_up, mode, strength=st)
-                strong_note = next((n for (n, _) in bar_events if n is not None), scale_up[0])
+                bar_events = _mutate_events(rng, base_bars[bar], bar_scale_up, mode, strength=st)
+                strong_note = next((n for (n, _) in bar_events if n is not None), bar_scale_up[0])
 
-            def _chord_up_for_degree(d: int):
-                rt, th, fi = triad_from_degree(scale, d, octave_bias=0)
+            def _chord_up_for_degree(d: int, sc: list[str], sc_up0: str):
+                rt, th, fi = triad_from_degree(sc, d, octave_bias=0)
                 cu = (note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12))
-                cu = tuple(n if n in CHROMATIC_SET else scale_up[0] for n in cu)
+                cu = tuple(n if n in CHROMATIC_SET else sc_up0 for n in cu)
                 return rt, th, fi, cu
 
-            root, third, fifth, chord_up = _chord_up_for_degree(deg)
+            root, third, fifth, chord_up = _chord_up_for_degree(deg, bar_scale, bar_scale_up[0])
 
             if p_idx != 3 and strong_note is not None and strong_note not in chord_up:
                 for cand in [0, 3, 4, 5, 2, 1]:
-                    rrt, rth, rfi, cu = _chord_up_for_degree(cand)
+                    rrt, rth, rfi, cu = _chord_up_for_degree(cand, bar_scale, bar_scale_up[0])
                     if strong_note in cu:
                         root, third, fifth, chord_up = rrt, rth, rfi, cu
                         break
@@ -1704,23 +1741,23 @@ def make_patterns(
                 if bar == 0:
                     hold = rng.choice([third, fifth, note_shift(root, 12)])
                     hold = note_shift(hold, 12) if hold.endswith('2') else hold
-                    hold = hold if hold in CHROMATIC_SET else scale_up[0]
+                    hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 elif bar == 1:
                     hold = rng.choice([fifth, third])
                     hold = note_shift(hold, 12) if hold.endswith('2') else hold
-                    hold = hold if hold in CHROMATIC_SET else scale_up[0]
+                    hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 elif bar == 2:
                     hold = rng.choice([third, root])
                     hold = note_shift(hold, 12) if hold.endswith('2') else hold
-                    hold = hold if hold in CHROMATIC_SET else scale_up[0]
+                    hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 else:
                     a = note_shift(root, 12)
                     b = note_shift(third, 12)
-                    a = a if a in CHROMATIC_SET else scale_up[0]
-                    b = b if b in CHROMATIC_SET else scale_up[0]
+                    a = a if a in CHROMATIC_SET else bar_scale_up[0]
+                    b = b if b in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, a)
                     set_cell(p_idx, start_row + 8, 0, b)
             else:
@@ -1862,7 +1899,7 @@ def make_patterns(
             if p_idx in (2, 4) and rng.random() < 0.75:
                 tones = [third, root, fifth, root]
                 tones = [note_shift(t, 12) if t.endswith('2') else t for t in tones]
-                tones = [t if t in CHROMATIC_SET else scale_up[0] for t in tones]
+                tones = [t if t in CHROMATIC_SET else bar_scale_up[0] for t in tones]
                 for i in range(0, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
 
@@ -1891,7 +1928,9 @@ def make_patterns(
         prog = progs[p_idx]
         for bar, deg in enumerate(prog):
             r0 = bar * 16
-            rt, th, fi = triad_from_degree(scale, deg, octave_bias=0)
+            use_alt = bool(use_mixed and bar_use_alt[p_idx][bar])
+            hscale = scale_alt if use_alt else scale
+            rt, th, fi = triad_from_degree(hscale, deg, octave_bias=0)
             allowed = [rt, th, fi, note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12), note_shift(rt, -12)]
             allowed = [n for n in allowed if n in CHROMATIC_SET]
             if not allowed:
@@ -3188,7 +3227,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.7.3)")
+    root.title("ProTracker MOD Choral Generator (v1.7.5)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -3375,7 +3414,7 @@ def run_gui():
             "BASE KEY (optional)": "Optional song key root (e.g. C-2, F#-2, Bb-2). Leave empty for random.",
             "SPEED": "MOD speed (ticks per row). Typical: 6.",
             "TEMPO": "MOD tempo (BPM). Typical: 125.",
-            "SCALE MODE": "Auto uses plugin 'mode' meta. Or force Major/Minor/etc.",
+            "SCALE MODE": "Auto uses plugin 'mode' meta. Or force Major/Minor/Mixed/etc.",
             "VARIATION": "Overall variation amount: higher = more drive/ornaments.",
             "SEED (optional)": "Seed for reproducible generation. Same seed = same song.",
             "BATCH": "Generate multiple songs in one run (seeds count up).",
@@ -3404,7 +3443,7 @@ def run_gui():
             "BASE KEY (optional)": "Optionale Tonart (z.B. C-2, F#-2, Bb-2). Leer = Zufall.",
             "SPEED": "MOD-Speed (Ticks pro Zeile). Typisch: 6.",
             "TEMPO": "MOD-Tempo (BPM). Typisch: 125.",
-            "SCALE MODE": "Auto nutzt Plugin-Meta 'mode'. Oder Major/Minor/etc erzwingen.",
+            "SCALE MODE": "Auto nutzt Plugin-Meta 'mode'. Oder Major/Minor/Mixed/etc erzwingen.",
             "VARIATION": "Variationsstärke: höher = mehr Drive/Ornamente.",
             "SEED (optional)": "Seed für reproduzierbare Generierung. Gleicher Seed = gleicher Song.",
             "BATCH": "Mehrere Songs in einem Lauf generieren (Seeds zählen hoch).",
@@ -3433,7 +3472,7 @@ def run_gui():
             "BASE KEY (optional)": "Tonalité (ex: C-2, F#-2, Bb-2). Vide = aléatoire.",
             "SPEED": "Vitesse MOD (ticks/ligne). Typique: 6.",
             "TEMPO": "Tempo MOD (BPM). Typique: 125.",
-            "SCALE MODE": "Auto utilise le meta 'mode'. Ou forcer Major/Minor/etc.",
+            "SCALE MODE": "Auto utilise le meta 'mode'. Ou forcer Major/Minor/Mixed/etc.",
             "VARIATION": "Variation: plus élevé = plus d'ornements/drive.",
             "SEED (optional)": "Graine reproductible. Même graine = même morceau.",
             "BATCH": "Générer plusieurs morceaux (seed incrémenté).",
@@ -4062,8 +4101,10 @@ def run_gui():
 
     info_txt.config(state="disabled")
 
-    # analyzer update loop
+    # analyzer + UI tick loops
     after_id = None
+    ui_after_id = None
+    closing = False
 
     def log(msg: str):
         info_txt.config(state="normal")
@@ -4138,6 +4179,8 @@ def run_gui():
     def analyzer_tick():
         nonlocal after_id
         try:
+            if closing:
+                return
             if play_state == "playing":
                 idx = int(max(0.0, time.perf_counter() - play_started_t) * preview_sr)
                 if viz_mode == "spectrum":
@@ -4152,7 +4195,8 @@ def run_gui():
                             viz_view.update_from_channels(preview_ch, preview_sr, idx, window=1024)
                         except Exception:
                             pass
-                after_id = root.after(50, analyzer_tick)
+                if not closing:
+                    after_id = root.after(50, analyzer_tick)
             else:
                 # nothing playing -> snap back to 0
                 if viz_view is not None and not getattr(viz_view, "_cleared", False):
@@ -4160,11 +4204,13 @@ def run_gui():
                         viz_view.reset()
                     except Exception:
                         pass
-                after_id = root.after(200, analyzer_tick)
+                if not closing:
+                    after_id = root.after(200, analyzer_tick)
         except BaseException:
             # Never let the visualizer crash the app.
             try:
-                after_id = root.after(200, analyzer_tick)
+                if not closing:
+                    after_id = root.after(200, analyzer_tick)
             except Exception:
                 pass
 
@@ -4427,10 +4473,13 @@ def run_gui():
 
     
     def _ui_tick():
+        nonlocal ui_after_id
         nonlocal is_rendering, auto_play_after_render
         nonlocal play_state, play_started_t, play_duration_s
 
         try:
+            if closing:
+                return
             # Rendering progress / completion
             if is_rendering:
                 with state_lock:
@@ -4535,7 +4584,8 @@ def run_gui():
                 pass
         finally:
             try:
-                root.after(120, _ui_tick)
+                if not closing:
+                    ui_after_id = root.after(120, _ui_tick)
             except Exception:
                 pass
 
@@ -4592,6 +4642,10 @@ def run_gui():
             pass
 
     def on_close():
+        nonlocal closing, ui_after_id
+        if closing:
+            return
+        closing = True
         try:
             render_cancel.set()
         except BaseException:
@@ -4600,8 +4654,34 @@ def run_gui():
             player.stop()
         except Exception:
             pass
-        stop_analyzer()
-        root.destroy()
+        # stop periodic callbacks
+        try:
+            stop_analyzer()
+        except Exception:
+            pass
+        if ui_after_id is not None:
+            try:
+                root.after_cancel(ui_after_id)
+            except Exception:
+                pass
+            ui_after_id = None
+        # hide any pending tooltips
+        try:
+            tips._hide()
+        except Exception:
+            pass
+        # Quit mainloop first, then destroy on next tick to avoid Tcl command deletion races.
+        try:
+            root.quit()
+        except Exception:
+            pass
+        try:
+            root.after(0, root.destroy)
+        except Exception:
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     gen_btn.config(command=on_generate)
     play_btn.config(command=on_play)
@@ -4634,7 +4714,7 @@ def main():
     ap.add_argument("-derive", type=str, default="Random", choices=["Random", "Near", "Far"], help="CLI: melody derivation style (Random/Near/Far).")
     ap.add_argument("-novibrato", action="store_true", help="CLI: disable vibrato in generated samples.")
     ap.add_argument("-key", type=str, default=None, help="CLI: base key root (e.g. C-2, F#-2, Bb-2). Empty=Random.")
-    ap.add_argument("-scale", type=str, default="Auto", choices=SCALE_MODE_CHOICES, help="CLI: scale/mode (Auto/Major/Minor/Dorian/Mixolydian).")
+    ap.add_argument("-scale", type=str, default="Auto", choices=SCALE_MODE_CHOICES, help="CLI: scale/mode (Auto/Major/Minor/Mixed/Dorian/Mixolydian).")
     ap.add_argument("-variation", type=float, default=0.65, help="CLI: variation strength 0..1.5 (default 0.65).")
     ap.add_argument("-seed", type=int, default=None, help="CLI: seed for deterministic generation.")
     ap.add_argument("-batch", type=int, default=1, help="CLI: generate N songs (seeds will increment).")
