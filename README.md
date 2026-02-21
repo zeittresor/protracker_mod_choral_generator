@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit x (latest / 21.02.2026 v1.7.8.4):</b></i>
+<i><b>New in Commit da7fe2b (latest / 21.02.2026 v1.7.8.4):</b></i>
 
 - Bug fixes
 - Channel Scope switched to show both stereo channels for rendered playback
