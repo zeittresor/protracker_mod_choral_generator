@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.7.5)
+# ProTracker MOD Choral Generator (v1.7.8.4)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import threading
 import time
 import wave
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 # -----------------------------
@@ -817,6 +817,9 @@ def get_plugin_metadata_display(name: str) -> str:
 # Reference fundamental for all generated samples (Hz). Tuned so that C-3 plays consistently across instruments.
 REF_F0 = 261.63
 
+# ProTracker-ish UI background color (used by a few Tk frames)
+PT_BG = "#8f8f8f"
+
 INSTRUMENT_CHOICES = [
     "Piano",
     "Clarinet",
@@ -859,6 +862,24 @@ def note_shift(note: str, semitones: int) -> str:
     j = i + semitones
     j = max(0, min(len(CHROMATIC) - 1, j))
     return CHROMATIC[j]
+
+
+def note_shift_safe(note: str, semitones: int) -> str:
+    """Shift by semitones, but NEVER clamp into a wrong note.
+
+    If the target would fall outside the supported ProTracker note range (C-1..B-3),
+    this returns the original note unchanged. This prevents octave-up operations from
+    collapsing into B-3 when notes already sit at the top of the table.
+    """
+    try:
+        i = CHROMATIC.index(note)
+    except ValueError:
+        return note
+    j = i + semitones
+    if 0 <= j < len(CHROMATIC):
+        return CHROMATIC[j]
+    return note
+
 
 
 def pack_cell(note_name: str | None = None, sample: int = 0, effect: int = 0, param: int = 0) -> bytes:
@@ -1319,7 +1340,7 @@ def _template_bar_to_events(
         if int(octv) != 0:
             note = note_shift(note, 12 * int(octv))
         while note not in CHROMATIC_SET and note.endswith('3'):
-            note = note_shift(note, -12)
+            note = note_shift_safe(note, -12)
         if note not in CHROMATIC_SET:
             note = note_shift(scale_up[0], 0)
         events.append((note, int(dur)))
@@ -1381,7 +1402,7 @@ def _mutate_events(
             if n is None:
                 out2.append((None, d))
             else:
-                nn = note_shift(n, 12)
+                nn = note_shift_safe(n, 12)
                 if nn not in CHROMATIC_SET:
                     nn = _nearest_in_scale(n, rng.choice([1, 2]))
                 out2.append((nn if nn in CHROMATIC_SET else n, d))
@@ -1531,6 +1552,7 @@ def make_patterns(
     key_root_override: str | None = None,
     scale_mode: str | None = None,
     variation: float = 1.0,
+    octave_spans: list[int] | None = None,
 ):
     NUM_CH = 4
     ROWS = 64
@@ -1560,12 +1582,12 @@ def make_patterns(
     if use_mixed:
         scale = scale_from_mode(key_root, 'major')
         scale_alt = scale_from_mode(key_root, 'minor')
-        scale_up = [note_shift(n, 12) for n in scale]
-        scale_alt_up = [note_shift(n, 12) for n in scale_alt]
+        scale_up = [note_shift_safe(n, 12) for n in scale]
+        scale_alt_up = [note_shift_safe(n, 12) for n in scale_alt]
         sm = 'mixed'
     else:
         scale = scale_from_mode(key_root, sm)
-        scale_up = [note_shift(n, 12) for n in scale]
+        scale_up = [note_shift_safe(n, 12) for n in scale]
         scale_alt = scale
         scale_alt_up = scale_up
 
@@ -1575,7 +1597,7 @@ def make_patterns(
         base_bars = []
         for deg in base_prog:
             rt, th, fi = triad_from_degree(scale, deg, octave_bias=0)
-            chord = [note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12)]
+            chord = [note_shift_safe(rt, 12), note_shift_safe(th, 12), note_shift_safe(fi, 12)]
             chord = [n if n in CHROMATIC_SET else scale_up[0] for n in chord]
             base_bars.append(build_bar_melody(rng, scale=scale_up, chord=chord, base_note=chord[0]))
     else:
@@ -1606,13 +1628,59 @@ def make_patterns(
                     prob *= 0.55
                 bar_use_alt[p_idx][bar] = (rng.random() < prob)
 
+    
+    # Per-channel octave policy: how many octaves around the base key octave are allowed.
+    def _parse_oct(note_: str) -> int | None:
+        try:
+            return int(note_[-1])
+        except Exception:
+            return None
+
+    base_oct = _parse_oct(key_root) or 2
+    spans = list(octave_spans) if (octave_spans and len(octave_spans) == 4) else [3, 3, 3, 3]
+    spans = [max(1, min(3, int(x))) for x in spans]
+
+    oct_limits = []
+    for s in spans:
+        if s % 2 == 1:
+            lo = base_oct - (s // 2)
+            hi = base_oct + (s // 2)
+        else:
+            lo = base_oct - (s // 2 - 1)
+            hi = base_oct + (s // 2)
+        lo = max(1, min(3, lo))
+        hi = max(1, min(3, hi))
+        if lo > hi:
+            lo, hi = hi, lo
+        oct_limits.append((lo, hi))
+
+    def apply_octave_policy(note_: str, ch_: int) -> str:
+        o = _parse_oct(note_)
+        if o is None:
+            return note_
+        lo, hi = oct_limits[ch_]
+        n = note_
+        while o < lo:
+            nn = note_shift_safe(n, 12)
+            if nn == n:
+                break
+            n = nn
+            o = _parse_oct(n) or o
+        while o > hi:
+            nn = note_shift_safe(n, -12)
+            if nn == n:
+                break
+            n = nn
+            o = _parse_oct(n) or o
+        return n
+
     def set_cell(p: int, row: int, ch: int, note: str | None = None, sample: int | None = None, effect: int = 0x00, param: int = 0x00):
         if note is None:
             samp = 0 if sample is None else sample
         else:
             samp = (ch + 1) if sample is None else sample
         if 0 <= row < 64:
-            patterns[p][row][ch] = (note, samp, effect, param)
+            patterns[p][row][ch] = (apply_octave_policy(note, ch) if note is not None else note, samp, effect, param)
 
     # 20 progressions (degree in major scale) - designed to stay "choral" but offer more variety
     progs = [
@@ -1709,7 +1777,7 @@ def make_patterns(
 
             def _chord_up_for_degree(d: int, sc: list[str], sc_up0: str):
                 rt, th, fi = triad_from_degree(sc, d, octave_bias=0)
-                cu = (note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12))
+                cu = (note_shift_safe(rt, 12), note_shift_safe(th, 12), note_shift_safe(fi, 12))
                 cu = tuple(n if n in CHROMATIC_SET else sc_up0 for n in cu)
                 return rt, th, fi, cu
 
@@ -1722,7 +1790,7 @@ def make_patterns(
                         root, third, fifth, chord_up = rrt, rth, rfi, cu
                         break
 
-            bass = note_shift(root, -12)
+            bass = note_shift_safe(root, -12)
             top = fifth
 
             # basic harmony bed
@@ -1739,23 +1807,23 @@ def make_patterns(
             # pad pattern
             if p_idx == 3:
                 if bar == 0:
-                    hold = rng.choice([third, fifth, note_shift(root, 12)])
-                    hold = note_shift(hold, 12) if hold.endswith('2') else hold
+                    hold = rng.choice([third, fifth, note_shift_safe(root, 12)])
+                    hold = note_shift_safe(hold, 12) if hold.endswith('2') else hold
                     hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 elif bar == 1:
                     hold = rng.choice([fifth, third])
-                    hold = note_shift(hold, 12) if hold.endswith('2') else hold
+                    hold = note_shift_safe(hold, 12) if hold.endswith('2') else hold
                     hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 elif bar == 2:
                     hold = rng.choice([third, root])
-                    hold = note_shift(hold, 12) if hold.endswith('2') else hold
+                    hold = note_shift_safe(hold, 12) if hold.endswith('2') else hold
                     hold = hold if hold in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, hold)
                 else:
-                    a = note_shift(root, 12)
-                    b = note_shift(third, 12)
+                    a = note_shift_safe(root, 12)
+                    b = note_shift_safe(third, 12)
                     a = a if a in CHROMATIC_SET else bar_scale_up[0]
                     b = b if b in CHROMATIC_SET else bar_scale_up[0]
                     set_cell(p_idx, start_row, 0, a)
@@ -1779,8 +1847,8 @@ def make_patterns(
             # extra motion layers for the new patterns
             if p_idx == 6:
                 # rhythmic "walking" bass + chord stabs
-                bass2 = note_shift(third, -12)
-                bass5 = note_shift(fifth, -12)
+                bass2 = note_shift_safe(third, -12)
+                bass5 = note_shift_safe(fifth, -12)
                 seq = [bass, bass5, bass2, bass5]
                 for i in range(0, 16, 4):
                     set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
@@ -1797,7 +1865,7 @@ def make_patterns(
 
             if p_idx == 8:
                 # lift: add extra top octave support
-                hi = note_shift(chord_up[2], 12)
+                hi = note_shift_safe(chord_up[2], 12)
                 if hi in CHROMATIC_SET and rng.random() < 0.7:
                     set_cell(p_idx, start_row + 8, 1, hi)
 
@@ -1811,8 +1879,8 @@ def make_patterns(
 
             if p_idx == 10:
                 # Pop-gospel drive: walking-ish bass + gentle offbeat stabs
-                bass2 = note_shift(third, -12)
-                bass5 = note_shift(fifth, -12)
+                bass2 = note_shift_safe(third, -12)
+                bass5 = note_shift_safe(fifth, -12)
                 seq = [bass, bass2, bass5, bass2]
                 for i in range(0, 16, 4):
                     set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
@@ -1822,7 +1890,7 @@ def make_patterns(
 
             if p_idx == 11:
                 # Amen cadence: sustained top + small answer line
-                hi = note_shift(chord_up[2], 12)
+                hi = note_shift_safe(chord_up[2], 12)
                 if hi in CHROMATIC_SET:
                     set_cell(p_idx, start_row, 1, hi)
                 # gentle answer in CH4
@@ -1835,7 +1903,7 @@ def make_patterns(
                 stab = chord_up[1]
                 for i in (4, 12):
                     set_cell(p_idx, start_row + i, 1, stab)
-                o = note_shift(chord_up[2], 12)
+                o = note_shift_safe(chord_up[2], 12)
                 if o in CHROMATIC_SET and rng.random() < 0.6:
                     set_cell(p_idx, start_row + 8, 1, o)
 
@@ -1854,7 +1922,7 @@ def make_patterns(
 
             if p_idx == 15:
                 # Circle-ish: extra motion in bass and short top pickups
-                bass5 = note_shift(fifth, -12)
+                bass5 = note_shift_safe(fifth, -12)
                 seq = [bass, bass5, bass, bass5]
                 for i in range(0, 16, 4):
                     set_cell(p_idx, start_row + i, 2, seq[(i // 4) % len(seq)])
@@ -1898,7 +1966,7 @@ def make_patterns(
             # keep legacy arpeggio feel in some patterns
             if p_idx in (2, 4) and rng.random() < 0.75:
                 tones = [third, root, fifth, root]
-                tones = [note_shift(t, 12) if t.endswith('2') else t for t in tones]
+                tones = [note_shift_safe(t, 12) if t.endswith('2') else t for t in tones]
                 tones = [t if t in CHROMATIC_SET else bar_scale_up[0] for t in tones]
                 for i in range(0, 16, 2):
                     set_cell(p_idx, start_row + i, 3, tones[(i // 2) % len(tones)])
@@ -1931,7 +1999,7 @@ def make_patterns(
             use_alt = bool(use_mixed and bar_use_alt[p_idx][bar])
             hscale = scale_alt if use_alt else scale
             rt, th, fi = triad_from_degree(hscale, deg, octave_bias=0)
-            allowed = [rt, th, fi, note_shift(rt, 12), note_shift(th, 12), note_shift(fi, 12), note_shift(rt, -12)]
+            allowed = [rt, th, fi, note_shift_safe(rt, 12), note_shift_safe(th, 12), note_shift_safe(fi, 12), note_shift_safe(rt, -12)]
             allowed = [n for n in allowed if n in CHROMATIC_SET]
             if not allowed:
                 continue
@@ -2090,8 +2158,7 @@ class SongData:
     vibrato_disabled: bool
     mute_channels: list[bool]
     stereo_width: float
-
-
+    octave_spans: list[int] = field(default_factory=lambda: [3, 3, 3, 3])
 def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
     note, samp, eff, par = cell
     n = note if note is not None else "---"
@@ -2175,17 +2242,37 @@ def plugin_export_text_from_song(mod_path: Path, song: SongData) -> str:
     This is designed so users can drop a saved parameter .txt into melody_plugins/<folder>/
     and the app can treat it as a base melody plugin.
     """
-    name = (getattr(song, 'title_txt', '') or mod_path.stem).strip() or mod_path.stem
-
-    # derive basic metadata hints
-    mode = 'major'
+    name = (getattr(song, 'title_txt', '') or mod_path.stem).strip() or mod_path.stem    # derive basic metadata hints
+    mode = ''
     try:
-        if getattr(song, 'base_melody_meta', None):
-            mode = str(song.base_melody_meta.get('mode', mode) or mode).strip().lower()
+        mode = str(getattr(song, 'scale_mode', '') or '').strip().lower()
+    except Exception:
+        mode = ''
+
+    # Prefer the actual song mode; fall back to base melody plugin meta if present.
+    try:
+        if not mode and getattr(song, 'base_melody_meta', None):
+            mode = str(song.base_melody_meta.get('mode', '') or '').strip().lower()
     except Exception:
         pass
-    if mode not in ('major', 'minor'):
-        mode = 'minor' if 'minor' in mode or 'moll' in mode else 'major'
+
+    if not mode:
+        mode = 'major'
+
+    # Normalize to the modes our plugin loader understands
+    if mode.startswith('maj'):
+        mode = 'major'
+    elif mode.startswith('min') or 'moll' in mode or 'aeolian' in mode:
+        mode = 'minor'
+    elif mode.startswith('dor'):
+        mode = 'dorian'
+    elif mode.startswith('mixo'):
+        mode = 'mixolydian'
+    elif mode.startswith('mix'):
+        mode = 'mixed'
+    else:
+        # default fallback
+        mode = 'minor' if 'minor' in mode else 'major'
 
     tempo = int(getattr(song, 'tempo', DEFAULT_TEMPO) or DEFAULT_TEMPO)
     tmin = max(40, tempo - 20)
@@ -2338,12 +2425,13 @@ def generate_song(
     variation: float = 1.0,
     mute_channels: list[bool] | None = None,
     stereo_width: float = 1.0,
+    octave_spans: list[int] | None = None,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
 
     if seed is None:
-        seed = int.from_bytes(os.urandom(8), "big") ^ (time.time_ns() & 0xFFFFFFFFFFFF)
+        seed = random_seed_value()
     rng = random.Random(seed)
 
     inst_kinds = normalize_instrument_list(instruments)
@@ -2368,6 +2456,7 @@ def generate_song(
         key_root_override=key_root_override,
         scale_mode=scale_mode,
         variation=variation,
+        octave_spans=octave_spans,
     )
 
     if order is None:
@@ -2451,6 +2540,9 @@ def generate_song(
             if mute_channels is not None else [False, False, False, False]
         ),
         stereo_width=float(stereo_width),
+        octave_spans=(
+            [int(octave_spans[i]) if octave_spans is not None and i < len(octave_spans) else 3 for i in range(4)]
+        ),
     )
 
     return path, song
@@ -3094,7 +3186,7 @@ class SpectrumAnalyzer:
 
 
 class OscilloscopeView:
-    """Tracker-like 4-channel scopes (click visualizer to toggle from spectrum)."""
+    """Stereo L/R scopes (click visualizer to toggle from spectrum)."""
 
     def __init__(self, canvas, width: int = 560, height: int = 160):
         self.canvas = canvas
@@ -3106,12 +3198,11 @@ class OscilloscopeView:
         self.canvas.configure(width=self.width, height=self.height, bg="#8f8f8f", highlightthickness=0)
 
         self._scope_ids: list[int] = []
-        self._mid_ids: list[int] = []
-
         inner_h = self.height - 2 * self._pad
-        self._slot_h = inner_h / 4.0
+        self._slot_h = inner_h / 2.0  # L / R
 
-        for ch in range(4):
+        labels = ["L", "R"]
+        for ch in range(2):
             x0 = self._pad
             x1 = self.width - self._pad
             y0 = self._pad + ch * self._slot_h
@@ -3119,13 +3210,10 @@ class OscilloscopeView:
 
             self.canvas.create_rectangle(x0, y0, x1, y1, outline="#6f6f6f", width=1)
             mid = (y0 + y1) * 0.5
-            mid_id = self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#6f6f6f")
-            self._mid_ids.append(mid_id)
+            self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#6f6f6f")
 
-            # channel label
-            self.canvas.create_text(x0 + 18, y0 + 10, text=f"CH{ch+1}", fill="#1a1a1a", font=("Courier New", 12, "bold"))
+            self.canvas.create_text(x0 + 14, y0 + 10, text=labels[ch], fill="#1a1a1a", font=("Courier New", 12, "bold"))
 
-            # waveform polyline
             line_id = self.canvas.create_line(x0 + 1, mid, x1 - 1, mid, fill="#1a1a1a", width=1)
             self._scope_ids.append(line_id)
 
@@ -3139,11 +3227,11 @@ class OscilloscopeView:
             mid = (y0 + y1) * 0.5
             self.canvas.coords(lid, x0 + 1, mid, x1 - 1, mid)
 
-    def update_from_channels(self, ch_bufs: list[array], sr: int, sample_index: int, window: int = 1024):
-        if not ch_bufs or len(ch_bufs) < 4:
+    def update_from_pcm(self, pcm16: bytes, sr: int, sample_index: int, window: int = 1024):
+        # pcm16: interleaved stereo int16 (L,R)
+        if not pcm16:
             return
-
-        total_frames = min(len(ch_bufs[0]), len(ch_bufs[1]), len(ch_bufs[2]), len(ch_bufs[3]))
+        total_frames = len(pcm16) // 4
         if total_frames <= 0:
             return
 
@@ -3156,23 +3244,25 @@ class OscilloscopeView:
         x1 = self.width - self._pad
         w = max(16, int(x1 - x0 - 2))
 
-        # number of points drawn per scope
-        pts = min(320, i1 - i0, w)
+        pts = min(360, i1 - i0, w)
 
-        for ch in range(4):
+        def get_lr(frame: int):
+            off = frame * 4
+            l = int.from_bytes(pcm16[off:off+2], "little", signed=True) / 32768.0
+            r = int.from_bytes(pcm16[off+2:off+4], "little", signed=True) / 32768.0
+            return l, r
+
+        for ch in range(2):
             y0 = self._pad + ch * self._slot_h
             y1 = y0 + self._slot_h
             mid = (y0 + y1) * 0.5
             amp = (self._slot_h * 0.42)
 
-            buf = ch_bufs[ch]
-            segment = buf[i0:i1]
-
-            coords: list[float] = []
-            # downsample by index mapping
+            coords = []
             for p in range(pts):
-                si = int(p * (len(segment) - 1) / max(1, pts - 1))
-                v = segment[si] / 32768.0
+                frame = i0 + int(p * (i1 - i0 - 1) / max(1, pts - 1))
+                l, r = get_lr(frame)
+                v = l if ch == 0 else r
                 x = x0 + 1 + (p * (w - 1) / max(1, pts - 1))
                 y = mid - (v * amp)
                 coords.extend([x, y])
@@ -3180,11 +3270,14 @@ class OscilloscopeView:
             self.canvas.coords(self._scope_ids[ch], *coords)
 
         self._cleared = False
+
 # -----------------------------
 # GUI (ProTracker-ish style)
 # -----------------------------
 
 def run_gui():
+    closing = False
+    ui_after_id = None
     import tkinter as tk
     from tkinter import messagebox
     from tkinter import ttk
@@ -3227,7 +3320,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.7.5)")
+    root.title("ProTracker MOD Choral Generator (v1.7.8.4)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -3311,6 +3404,7 @@ def run_gui():
             "SCALE MODE": "SCALE MODE",
             "VARIATION": "VARIATION",
             "SEED (optional)": "SEED (optional)",
+            "NEW SEED EACH GENERATE": "NEW SEED EACH GENERATE",
             "RND": "RND",
             "BATCH": "BATCH",
             "MUTE CH": "MUTE CH",
@@ -3320,7 +3414,8 @@ def run_gui():
             "Save song parameters": "Save song parameters",
             "Disable vibrato in samples": "Disable vibrato in samples",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
-            "GENERATE": "GENERATE",
+            
+            "OCTAVE SPAN": "OCTAVE SPAN","GENERATE": "GENERATE",
             "PLAY": "PLAY",
             "STOP": "STOP",
             "OPEN OUTPUT": "OPEN OUTPUT",
@@ -3328,7 +3423,7 @@ def run_gui():
             "REFRESH": "REFRESH",
             "ADD AS PLUGIN": "ADD AS PLUGIN",
             "SPECTRUM ANALYZER": "SPECTRUM ANALYZER",
-            "CHANNEL SCOPES": "CHANNEL SCOPES",
+            "STEREO SCOPES": "STEREO SCOPES",
             "Click visualizer to toggle Spectrum / Scopes": "Click visualizer to toggle Spectrum / Scopes",
             "PATTERN PREVIEW": "PATTERN PREVIEW",
             "Generate a song, then hit PLAY.": "Generate a song, then hit PLAY.",
@@ -3345,6 +3440,7 @@ def run_gui():
             "SCALE MODE": "TONART/MODUS",
             "VARIATION": "VARIATION",
             "SEED (optional)": "SEED (optional)",
+            "NEW SEED EACH GENERATE": "NEUER SEED PRO GENERIERUNG",
             "RND": "ZUFALL",
             "BATCH": "STAPEL",
             "MUTE CH": "MUTE KANÄLE",
@@ -3354,7 +3450,8 @@ def run_gui():
             "Save song parameters": "Song-Parameter speichern",
             "Disable vibrato in samples": "Vibrato in Samples deaktivieren",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTE (CH1..CH4)",
-            "GENERATE": "GENERIEREN",
+            
+            "OCTAVE SPAN": "OKTAVEN","GENERATE": "GENERIEREN",
             "PLAY": "ABSPIELEN",
             "STOP": "STOP",
             "OPEN OUTPUT": "AUSGABE ÖFFNEN",
@@ -3362,7 +3459,7 @@ def run_gui():
             "REFRESH": "AKTUALISIEREN",
             "ADD AS PLUGIN": "ALS PLUGIN HINZUFÜGEN",
             "SPECTRUM ANALYZER": "SPEKTRUM-ANALYSATOR",
-            "CHANNEL SCOPES": "KANAL-OSZILLOSCOPE",
+            "STEREO SCOPES": "STEREO-OSZILLOSCOPE",
             "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: Spektrum / Scopes",
             "PATTERN PREVIEW": "PATTERN-VORSCHAU",
             "Generate a song, then hit PLAY.": "Song generieren, dann PLAY drücken.",
@@ -3379,6 +3476,7 @@ def run_gui():
             "SCALE MODE": "MODE GAMME",
             "VARIATION": "VARIATION",
             "SEED (optional)": "GRAINE (optionnel)",
+            "NEW SEED EACH GENERATE": "NOUVELLE GRAINE À CHAQUE GÉNÉRATION",
             "RND": "ALÉA",
             "BATCH": "LOT",
             "MUTE CH": "MUET CH",
@@ -3388,7 +3486,8 @@ def run_gui():
             "Save song parameters": "Sauver les paramètres",
             "Disable vibrato in samples": "Désactiver le vibrato",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
-            "GENERATE": "GÉNÉRER",
+            
+            "OCTAVE SPAN": "OCTAVES","GENERATE": "GÉNÉRER",
             "PLAY": "JOUER",
             "STOP": "STOP",
             "OPEN OUTPUT": "OUVRIR SORTIE",
@@ -3396,7 +3495,7 @@ def run_gui():
             "REFRESH": "RAFRAÎCHIR",
             "ADD AS PLUGIN": "AJOUTER COMME PLUGIN",
             "SPECTRUM ANALYZER": "ANALYSEUR DE SPECTRE",
-            "CHANNEL SCOPES": "OSCILLOSCOPES",
+            "STEREO SCOPES": "OSCILLOSCOPE STÉRÉO",
             "Click visualizer to toggle Spectrum / Scopes": "Cliquer: Spectre / Oscillos",
             "PATTERN PREVIEW": "APERÇU PATTERN",
             "Generate a song, then hit PLAY.": "Générez un morceau, puis PLAY.",
@@ -3417,6 +3516,7 @@ def run_gui():
             "SCALE MODE": "Auto uses plugin 'mode' meta. Or force Major/Minor/Mixed/etc.",
             "VARIATION": "Overall variation amount: higher = more drive/ornaments.",
             "SEED (optional)": "Seed for reproducible generation. Same seed = same song.",
+            "NEW SEED EACH GENERATE": "When enabled, each GENERATE uses a fresh random seed (uncheck to reuse the seed).",
             "BATCH": "Generate multiple songs in one run (seeds count up).",
             "MUTE CH": "Mute channels in preview rendering.",
             "STEREO %": "Stereo width for preview rendering.",
@@ -3424,7 +3524,8 @@ def run_gui():
             "Export rendered songs as WAV": "Save preview rendering as .wav next to the .mod.",
             "Save song parameters": "Save song parameters as .txt next to the .mod.",
             "Disable vibrato in samples": "Disable vibrato in synthesized instruments (more stable pitch).",
-            "GENERATE": "Generate a new .mod using the current settings.",
+            
+            "OCTAVE SPAN": "Per channel: how many octaves (around the base key octave) notes may use. 1=only base octave, 3=base±1.","GENERATE": "Generate a new .mod using the current settings.",
             "PLAY": "Render preview audio and play it.",
             "STOP": "Stop playback.",
             "OPEN OUTPUT": "Open the output folder (mods_out).",
@@ -3446,6 +3547,7 @@ def run_gui():
             "SCALE MODE": "Auto nutzt Plugin-Meta 'mode'. Oder Major/Minor/Mixed/etc erzwingen.",
             "VARIATION": "Variationsstärke: höher = mehr Drive/Ornamente.",
             "SEED (optional)": "Seed für reproduzierbare Generierung. Gleicher Seed = gleicher Song.",
+            "NEW SEED EACH GENERATE": "Wenn aktiv, nutzt jede Generierung einen neuen Zufalls-Seed (deaktivieren = Seed wiederverwenden).",
             "BATCH": "Mehrere Songs in einem Lauf generieren (Seeds zählen hoch).",
             "MUTE CH": "Kanäle im Preview stummschalten.",
             "STEREO %": "Stereo-Breite für den Preview-Render.",
@@ -3453,7 +3555,8 @@ def run_gui():
             "Export rendered songs as WAV": "Preview als .wav neben der .mod speichern.",
             "Save song parameters": "Song-Parameter als .txt neben der .mod speichern.",
             "Disable vibrato in samples": "Vibrato in Synth-Instrumenten deaktivieren (stabilere Tonhöhe).",
-            "GENERATE": "Erzeugt eine neue .mod Datei mit den aktuellen Einstellungen.",
+            
+            "OCTAVE SPAN": "Pro Kanal: über wie viele Oktaven (um die Basis-Oktave) Noten verteilt sein dürfen. 1=nur Basis-Oktave, 3=Basis±1.","GENERATE": "Erzeugt eine neue .mod Datei mit den aktuellen Einstellungen.",
             "PLAY": "Preview rendern und abspielen.",
             "STOP": "Playback stoppen.",
             "OPEN OUTPUT": "Ausgabeordner öffnen (mods_out).",
@@ -3475,6 +3578,7 @@ def run_gui():
             "SCALE MODE": "Auto utilise le meta 'mode'. Ou forcer Major/Minor/Mixed/etc.",
             "VARIATION": "Variation: plus élevé = plus d'ornements/drive.",
             "SEED (optional)": "Graine reproductible. Même graine = même morceau.",
+            "NEW SEED EACH GENERATE": "Si activé, chaque génération utilise une nouvelle graine aléatoire (désactiver = réutiliser la graine).",
             "BATCH": "Générer plusieurs morceaux (seed incrémenté).",
             "MUTE CH": "Couper des canaux dans l'aperçu.",
             "STEREO %": "Largeur stéréo de l'aperçu.",
@@ -3482,7 +3586,8 @@ def run_gui():
             "Export rendered songs as WAV": "Enregistrer l'aperçu en .wav à côté du .mod.",
             "Save song parameters": "Enregistrer les paramètres en .txt à côté du .mod.",
             "Disable vibrato in samples": "Désactiver le vibrato (hauteur plus stable).",
-            "GENERATE": "Générer un nouveau .mod avec les réglages actuels.",
+            
+            "OCTAVE SPAN": "Par canal : nombre d’octaves autorisées (autour de l’octave de base). 1=octave de base, 3=base±1.","GENERATE": "Générer un nouveau .mod avec les réglages actuels.",
             "PLAY": "Rendre l'aperçu audio et le lire.",
             "STOP": "Arrêter la lecture.",
             "OPEN OUTPUT": "Ouvrir le dossier de sortie (mods_out).",
@@ -3790,25 +3895,31 @@ def run_gui():
     rnd_seed_btn.pack(side="left", padx=(6, 0))
     tips.bind(rnd_seed_btn, "SEED (optional)")
 
-    pt_label(adv, "BATCH").grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
+    auto_seed_var = tk.BooleanVar(value=True)
+    auto_seed_cb = ttk.Checkbutton(adv, text=tr("NEW SEED EACH GENERATE"), variable=auto_seed_var, style="PT.TCheckbutton")
+    _bind_i18n(auto_seed_cb, "NEW SEED EACH GENERATE")
+    auto_seed_cb.grid(row=3, column=0, columnspan=2, sticky="w", padx=6, pady=(2, 6))
+    tips.bind(auto_seed_cb, "NEW SEED EACH GENERATE")
+
+    pt_label(adv, "BATCH").grid(row=4, column=0, sticky="w", padx=6, pady=(2, 6))
     batch_var = tk.IntVar(value=1)
     batch_spin = tk.Spinbox(adv, from_=1, to=50, textvariable=batch_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    batch_spin.grid(row=3, column=1, sticky="e", padx=6, pady=(2, 6))
+    batch_spin.grid(row=4, column=1, sticky="e", padx=6, pady=(2, 6))
     tips.bind(batch_spin, "BATCH")
 
-    pt_label(adv, "MUTE CH").grid(row=4, column=0, sticky="w", padx=6, pady=(2, 6))
+    pt_label(adv, "MUTE CH").grid(row=5, column=0, sticky="w", padx=6, pady=(2, 6))
     mute_vars = [tk.BooleanVar(value=False) for _ in range(4)]
     mute_row = tk.Frame(adv, bg="#8f8f8f")
-    mute_row.grid(row=4, column=1, sticky="e", padx=6, pady=(2, 6))
+    mute_row.grid(row=5, column=1, sticky="e", padx=6, pady=(2, 6))
     for i in range(4):
         cb = ttk.Checkbutton(mute_row, text=f"{i+1}", variable=mute_vars[i], style="PT.TCheckbutton")
         cb.pack(side="left")
         tips.bind(cb, "MUTE CH")
 
-    pt_label(adv, "STEREO %").grid(row=5, column=0, sticky="w", padx=6, pady=(0, 6))
+    pt_label(adv, "STEREO %").grid(row=6, column=0, sticky="w", padx=6, pady=(0, 6))
     width_var = tk.IntVar(value=100)
     width_scale = tk.Scale(adv, from_=0, to=200, orient="horizontal", variable=width_var, length=180, bg="#8f8f8f", highlightthickness=0)
-    width_scale.grid(row=5, column=1, sticky="e", padx=6, pady=(0, 6))
+    width_scale.grid(row=6, column=1, sticky="e", padx=6, pady=(0, 6))
     tips.bind(width_scale, "STEREO %")
 
 
@@ -3851,6 +3962,14 @@ def run_gui():
 
 
     pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=14, column=0, sticky="w", padx=8)
+    # small hint label
+    try:
+        oct_hint = pt_label(left, "OCTAVE SPAN")
+        oct_hint.grid(row=14, column=0, sticky="w", padx=160)
+        tips.bind(oct_hint, "OCTAVE SPAN")
+        _bind_i18n(oct_hint, "OCTAVE SPAN")
+    except Exception:
+        pass
 
     def _randomize_instruments():
         # curated palettes that tend to blend well
@@ -3882,17 +4001,23 @@ def run_gui():
     tips.bind(rnd_inst_btn, "INSTRUMENTS (CH1..CH4)")
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
+    oct_vars = [tk.StringVar(value="3") for _ in range(4)]  # 1..3
 
-    def add_inst_row(r: int, label: str, var: tk.StringVar):
+    def add_inst_row(r: int, label: str, var: tk.StringVar, octv: tk.StringVar):
         pt_label(left, label).grid(row=r, column=0, sticky="w", padx=8, pady=2)
-        cb = ttk.Combobox(left, textvariable=var, values=INSTRUMENT_CHOICES, width=18, style="PT.TCombobox", state="readonly")
-        cb.grid(row=r, column=1, sticky="e", padx=8, pady=2)
+        rowf = tk.Frame(left, bg=PT_BG)
+        rowf.grid(row=r, column=1, sticky="e", padx=8, pady=2)
+        cb = ttk.Combobox(rowf, textvariable=var, values=INSTRUMENT_CHOICES, width=16, style="PT.TCombobox", state="readonly")
+        cb.pack(side="left")
+        oc = ttk.Combobox(rowf, textvariable=octv, values=["1","2","3"], width=3, style="PT.TCombobox", state="readonly")
+        oc.pack(side="left", padx=(6,0))
         tips.bind(cb, "INSTRUMENTS (CH1..CH4)")
+        tips.bind(oc, "OCTAVE SPAN")
 
-    add_inst_row(15, "CH1", inst_vars[0])
-    add_inst_row(16, "CH2", inst_vars[1])
-    add_inst_row(17, "CH3", inst_vars[2])
-    add_inst_row(18, "CH4", inst_vars[3])
+    add_inst_row(15, "CH1", inst_vars[0], oct_vars[0])
+    add_inst_row(16, "CH2", inst_vars[1], oct_vars[1])
+    add_inst_row(17, "CH3", inst_vars[2], oct_vars[2])
+    add_inst_row(18, "CH4", inst_vars[3], oct_vars[3])
 
     # Language selector (affects labels + tooltips)
     pt_label(left, "LANGUAGE").grid(row=19, column=0, sticky="w", padx=8, pady=(10, 2))
@@ -3916,7 +4041,7 @@ def run_gui():
             if viz_mode == "spectrum":
                 viz_title_var.set(tr("SPECTRUM ANALYZER"))
             else:
-                viz_title_var.set(tr("CHANNEL SCOPES"))
+                viz_title_var.set(tr("STEREO SCOPES"))
         except Exception:
             pass
 
@@ -4006,7 +4131,7 @@ def run_gui():
             viz_title_var.set(tr("SPECTRUM ANALYZER"))
             viz_view = SpectrumAnalyzer(canvas, bars=32, width=560, height=160, segments=22)
         else:
-            viz_title_var.set(tr("CHANNEL SCOPES"))
+            viz_title_var.set(tr("STEREO SCOPES"))
             viz_view = OscilloscopeView(canvas, width=560, height=160)
         try:
             viz_view.reset()
@@ -4101,10 +4226,8 @@ def run_gui():
 
     info_txt.config(state="disabled")
 
-    # analyzer + UI tick loops
+    # analyzer update loop
     after_id = None
-    ui_after_id = None
-    closing = False
 
     def log(msg: str):
         info_txt.config(state="normal")
@@ -4114,7 +4237,7 @@ def run_gui():
 
     def post_log(msg: str):
         try:
-            root.after(0, lambda: log(msg))
+            (not closing) and root.after(0, lambda: log(msg))
         except Exception:
             pass
 
@@ -4190,13 +4313,12 @@ def run_gui():
                         except Exception:
                             pass
                 else:
-                    if preview_ch and viz_view is not None:
+                    if preview_pcm and viz_view is not None:
                         try:
-                            viz_view.update_from_channels(preview_ch, preview_sr, idx, window=1024)
+                            viz_view.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
                         except Exception:
                             pass
-                if not closing:
-                    after_id = root.after(50, analyzer_tick)
+                after_id = (None if closing else root.after(50, analyzer_tick))
             else:
                 # nothing playing -> snap back to 0
                 if viz_view is not None and not getattr(viz_view, "_cleared", False):
@@ -4204,13 +4326,11 @@ def run_gui():
                         viz_view.reset()
                     except Exception:
                         pass
-                if not closing:
-                    after_id = root.after(200, analyzer_tick)
+                after_id = (None if closing else root.after(200, analyzer_tick))
         except BaseException:
             # Never let the visualizer crash the app.
             try:
-                if not closing:
-                    after_id = root.after(200, analyzer_tick)
+                after_id = (None if closing else root.after(200, analyzer_tick))
             except Exception:
                 pass
 
@@ -4255,24 +4375,47 @@ def run_gui():
 
             instruments = [v.get() for v in inst_vars]
 
-            # seed/batch
+            # Octave span per channel (1..3). "1" means: stay in the base key octave only.
+            spans_used: list[int] = []
+            for _i, _v in enumerate(oct_vars, start=1):
+                try:
+                    s = int((_v.get() or "3").strip())
+                except Exception:
+                    s = 3
+                spans_used.append(max(1, min(3, s)))
+
+            
+# seed/batch
             seed_base: int | None = None
+            st = ""
             try:
                 st = seed_var.get().strip()
-                seed_base = int(st) if st else None
             except Exception:
-                seed_base = None
+                st = ""
+
+            if auto_seed_var.get():
+                seed_base = random_seed_value()
+                try:
+                    seed_var.set(str(seed_base))
+                except Exception:
+                    pass
+            else:
+                try:
+                    seed_base = int(st) if st else None
+                except Exception:
+                    seed_base = None
+                if seed_base is None:
+                    seed_base = random_seed_value()
+                    try:
+                        seed_var.set(str(seed_base))
+                    except Exception:
+                        pass
+
             try:
                 batch_n = int(batch_var.get())
             except Exception:
                 batch_n = 1
             batch_n = max(1, min(50, batch_n))
-            if seed_base is None:
-                seed_base = int(time.time() * 1000) ^ (os.getpid() << 8)
-                try:
-                    seed_var.set(str(seed_base))
-                except Exception:
-                    pass
 
             last_path = None
             last_song_local = None
@@ -4299,6 +4442,7 @@ def run_gui():
                     variation=variation,
                     mute_channels=mutes,
                     stereo_width=stereo_width,
+                    octave_spans=spans_used,
                 )
                 last_path = path
                 last_song_local = song
@@ -4473,13 +4617,10 @@ def run_gui():
 
     
     def _ui_tick():
-        nonlocal ui_after_id
         nonlocal is_rendering, auto_play_after_render
         nonlocal play_state, play_started_t, play_duration_s
 
         try:
-            if closing:
-                return
             # Rendering progress / completion
             if is_rendering:
                 with state_lock:
@@ -4583,6 +4724,7 @@ def run_gui():
             except Exception:
                 pass
         finally:
+            nonlocal ui_after_id
             try:
                 if not closing:
                     ui_after_id = root.after(120, _ui_tick)
@@ -4643,8 +4785,6 @@ def run_gui():
 
     def on_close():
         nonlocal closing, ui_after_id
-        if closing:
-            return
         closing = True
         try:
             render_cancel.set()
@@ -4654,7 +4794,6 @@ def run_gui():
             player.stop()
         except Exception:
             pass
-        # stop periodic callbacks
         try:
             stop_analyzer()
         except Exception:
@@ -4665,12 +4804,6 @@ def run_gui():
             except Exception:
                 pass
             ui_after_id = None
-        # hide any pending tooltips
-        try:
-            tips._hide()
-        except Exception:
-            pass
-        # Quit mainloop first, then destroy on next tick to avoid Tcl command deletion races.
         try:
             root.quit()
         except Exception:
@@ -4692,6 +4825,22 @@ def run_gui():
     left.columnconfigure(0, weight=1)
     left.columnconfigure(1, weight=1)
 
+    
+    # Final geometry adjustment so nothing is clipped (based on requested size).
+    try:
+        root.update_idletasks()
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        reqw = root.winfo_reqwidth()
+        reqh = root.winfo_reqheight()
+        w = min(sw - 60, max(reqw + 20, 1040))
+        h = min(sh - 80, max(reqh + 20, 860))
+        root.geometry(f"{w}x{h}")
+        root.minsize(min(w, reqw), min(h, reqh))
+    except Exception:
+        pass
+
+    # Start GUI event loop
     root.mainloop()
 
 
