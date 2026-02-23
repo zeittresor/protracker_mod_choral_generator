@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.8.0)
+# ProTracker MOD Choral Generator (v1.8.1)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -860,6 +860,36 @@ INSTRUMENT_CHOICES = [
 
 DEFAULT_INSTRUMENTS = ["Piano", "Piano", "Piano", "Piano"]
 
+# Per-instrument default volumes (0..64). This helps keep bright instruments from overpowering softer ones.
+# You can still override volumes later in a tracker.
+INSTRUMENT_VOL: dict[str, int] = {
+    "Piano": 48,
+    "Electric Piano": 46,
+    "Organ": 44,
+    "Strings": 46,
+    "Violin": 44,
+    "Choir Aah": 46,
+    "Choir Ooh": 46,
+    "Clarinet": 44,
+    "Sax": 42,
+    "Flute": 44,
+    "Oboe": 44,
+    "Bassoon": 46,
+    "French Horn": 44,
+    "Trumpet": 40,
+    "Tuba": 50,
+    "Banjo": 42,
+    "Acoustic Guitar": 44,
+    "Flamenco Guitar": 42,
+    "Harp": 44,
+    "Celesta": 40,
+    "Bell": 34,
+    "Synth Pad": 42,
+    "Synth Lead": 40,
+    "Square Lead": 38,
+}
+
+
 # Drumset "instruments" (style presets). Selecting one of these for a channel turns that channel into a drum track.
 DRUMSET_STYLE_MAP: dict[str, str] = {
     "Dubstep (Drumset)": "dubstep",
@@ -969,12 +999,12 @@ def inst_header(
 def make_pianoish_sample(rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0) -> bytes:
     attack = int(sr * rng.uniform(0.004, 0.008))
     decay = rng.uniform(0.9, 1.6)
-    detune = rng.uniform(0.9990, 1.0025)
+    detune = rng.uniform(0.99985, 1.00015)
 
     h2 = rng.uniform(0.35, 0.50)
     h3 = rng.uniform(0.18, 0.28)
     h4 = rng.uniform(0.10, 0.20)
-    d2 = rng.uniform(0.04, 0.10)
+    d2 = rng.uniform(0.02, 0.06)
 
     data = bytearray()
     for n in range(length):
@@ -1009,7 +1039,7 @@ def _one_pole_lowpass(x: float, state: float, alpha: float) -> float:
     return state + alpha * (x - state)
 
 
-def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0, disable_vibrato: bool = False) -> bytes:
+def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, sr: int = 8287, f0: float = REF_F0, disable_vibrato: bool = False, ensemble_size: int = 4) -> bytes:
     kind = (kind or "").strip()
     if kind not in INSTRUMENT_CHOICES:
         kind = "Piano"
@@ -1017,15 +1047,21 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
     if kind == "Piano":
         return make_pianoish_sample(rng, length=length, sr=sr, f0=f0)
 
-    detune = rng.uniform(0.9990, 1.0015)
-    vib_rate = rng.uniform(4.5, 6.2)
-    vib_amt = rng.uniform(0.0, 0.0030) if kind in ("Violin", "Strings", "Synth Pad", "Choir Aah", "Panflute", "Flute") else rng.uniform(0.0, 0.0015)
+    # Keep tuning cohesive across instruments (avoid random per-instrument detune that can sound "schräg" in ensembles).
+    detune = 1.0
+
+    # Use a mostly-shared vibrato rate; scale vibrato depth down when multiple voices play together.
+    vib_rate = 5.3 + rng.uniform(-0.25, 0.25)
+    vib_amt = (rng.uniform(0.0, 0.0020) if kind in ("Violin", "Strings", "Synth Pad", "Choir Aah", "Choir Ooh", "Panflute", "Flute") else rng.uniform(0.0, 0.0010))
+    ens = max(1, int(ensemble_size))
+    vib_amt *= (0.35 if ens >= 2 else 0.65)
 
     if kind == "Organ":
         vib_amt = 0.0
 
     if disable_vibrato:
         vib_amt = 0.0
+
 
     # Envelope choices (kept conservative so pitch feels stable)
     if kind in ("Synth Pad", "Synth Lead", "Square Lead", "Violin", "Strings", "Choir Aah", "Choir Ooh", "Panflute", "Clarinet", "Sax", "Flute", "Oboe", "Organ", "French Horn", "Trumpet", "Bassoon"):
@@ -1183,7 +1219,8 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
             x += a * math.sin(2 * math.pi * (f * k) * t)
 
         if kind in ("Synth Pad", "Synth Lead", "Violin", "Sax"):
-            x += 0.12 * math.sin(2 * math.pi * (f * detune) * t)
+            chorus_detune = 1.0018
+            x += 0.08 * math.sin(2 * math.pi * (f * chorus_detune) * t)
 
         if noise_amt > 0.0:
             x += rng.uniform(-1.0, 1.0) * noise_amt
@@ -2125,14 +2162,66 @@ def make_patterns(
                 cu = tuple(n if n in CHROMATIC_SET else sc_up0 for n in cu)
                 return rt, th, fi, cu
 
-            root, third, fifth, chord_up = _chord_up_for_degree(deg, bar_scale, bar_scale_up[0])
-
-            if p_idx != 3 and strong_note is not None and strong_note not in chord_up:
-                for cand in [0, 3, 4, 5, 2, 1]:
-                    rrt, rth, rfi, cu = _chord_up_for_degree(cand, bar_scale, bar_scale_up[0])
-                    if strong_note in cu:
-                        root, third, fifth, chord_up = rrt, rth, rfi, cu
+            # Choose a chord degree that best fits the melody on the strong beats of this bar.
+            # This reduces occasional "schräg" moments when the melody uses passing tones.
+            def _active_notes_16(ev: list[tuple[str | None, int]]) -> list[str | None]:
+                cur: str | None = None
+                outn: list[str | None] = []
+                r = 0
+                for nn, dd in ev:
+                    dd = max(1, int(dd))
+                    if nn is not None:
+                        cur = nn
+                    for _ in range(dd):
+                        if r >= 16:
+                            break
+                        outn.append(cur)
+                        r += 1
+                    if r >= 16:
                         break
+                if len(outn) < 16:
+                    outn += [cur] * (16 - len(outn))
+                return outn[:16]
+
+            def _best_degree(base_deg: int) -> int:
+                cands: list[int] = []
+                for x in [base_deg, 0, 3, 4, 5, 2, 1]:
+                    xi = int(x)
+                    if xi not in cands:
+                        cands.append(xi)
+
+                active = _active_notes_16(bar_events)
+                beat_rows = (0, 4, 8, 12)
+                beat_pcs: list[str] = []
+                for br in beat_rows:
+                    nn = active[br] if br < len(active) else None
+                    if nn is not None and nn in CHROMATIC_SET:
+                        beat_pcs.append(_pc(nn))
+
+                if (not beat_pcs) and strong_note is not None and strong_note in CHROMATIC_SET:
+                    beat_pcs = [_pc(strong_note)]
+
+                best_deg = int(base_deg)
+                best_score = -1e18
+                for cand in cands:
+                    rt_c, th_c, fi_c, _ = _chord_up_for_degree(cand, bar_scale, bar_scale_up[0])
+                    chord_pcs = {_pc(rt_c), _pc(th_c), _pc(fi_c)}
+                    score = 0.0
+
+                    for pc in beat_pcs:
+                        score += (2.0 if pc in chord_pcs else -0.6)
+
+                    if strong_note is not None and strong_note in CHROMATIC_SET:
+                        score += (1.8 if _pc(strong_note) in chord_pcs else -1.2)
+
+                    score -= abs(int(cand) - int(base_deg)) * 0.35
+                    if score > best_score:
+                        best_score = score
+                        best_deg = int(cand)
+                return best_deg
+
+            use_deg = int(deg) if p_idx == 3 else _best_degree(int(deg))
+            root, third, fifth, chord_up = _chord_up_for_degree(use_deg, bar_scale, bar_scale_up[0])
 
             # choose a non-crossing triad voicing (keeps accompaniment chord-consistent and "in tune")
             melody_ub = strong_note if (strong_note is not None and strong_note in CHROMATIC_SET) else None
@@ -2971,10 +3060,12 @@ def generate_song(
         if st:
             drum_channel_styles[int(ch)] = str(st)
 
+    ensemble_size = sum(1 for ch in range(len(inst_kinds)) if int(ch) not in drum_channel_styles)
+
     # --- sample allocation (up to 31 instruments) ---
     # We keep the first 4 sample slots reserved for the 4 channels (legacy-friendly),
     # then append drumkit samples as extra instruments (sample numbers 5..31).
-    sample_cache: dict[tuple[str, bool], bytes] = {}
+    sample_cache: dict[tuple[str, bool, int], bytes] = {}
     samples_bytes: list[bytes] = []
     sample_names: list[str] = []
     sample_vols: list[int] = []
@@ -2987,12 +3078,12 @@ def generate_song(
             sample_names.append(k)
             sample_vols.append(0)
         else:
-            ck = (k, bool(disable_vibrato))
+            ck = (k, bool(disable_vibrato), int(ensemble_size))
             if ck not in sample_cache:
-                sample_cache[ck] = make_instrument_sample(k, rng_s, f0=REF_F0, disable_vibrato=bool(disable_vibrato))
+                sample_cache[ck] = make_instrument_sample(k, rng_s, f0=REF_F0, disable_vibrato=bool(disable_vibrato), ensemble_size=int(ensemble_size))
             samples_bytes.append(sample_cache[ck])
             sample_names.append(k)
-            sample_vols.append(48)
+            sample_vols.append(int(INSTRUMENT_VOL.get(k, 48)))
 
     # drumkits (shared per style)
     drum_sample_numbers: dict[str, dict[str, int]] = {}
@@ -3918,7 +4009,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.8.0)")
+    root.title("ProTracker MOD Choral Generator (v1.8.1)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
