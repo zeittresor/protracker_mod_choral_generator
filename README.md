@@ -10,7 +10,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <i><b>New in Commit ee77f2e (23.02.2026 v1.8.1):</b></i>
 
 - Some work on the harmonize engine
-- Basic crum sets for music styles added
+- Basic drum sets for music styles added
 - Bug fixes
 
 <img width="1276" height="961" alt="181" src="https://github.com/user-attachments/assets/2ca455cb-86a3-4234-9e9c-462b703d4692" />
