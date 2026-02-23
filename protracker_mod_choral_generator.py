@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.7.8.4)
+# ProTracker MOD Choral Generator (v1.8.0)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -820,6 +820,10 @@ REF_F0 = 261.63
 # ProTracker-ish UI background color (used by a few Tk frames)
 PT_BG = "#8f8f8f"
 
+
+MOD_SIGNATURE_CHOICES = ["M.K.", "M!K!"]
+DEFAULT_MOD_SIGNATURE = "M!K!"  # tends to be accepted by more players
+
 INSTRUMENT_CHOICES = [
     "Piano",
     "Clarinet",
@@ -846,9 +850,55 @@ INSTRUMENT_CHOICES = [
     "Choir Ooh",
     "Synth Lead",
     "Square Lead",
+    "Dubstep (Drumset)",
+    "Techno Music (Drumset)",
+    "Pop (Drumset)",
+    "Folk (Drumset)",
+    "Rock (Drumset)",
+    "Hip-Hop (Drumset)",
 ]
 
 DEFAULT_INSTRUMENTS = ["Piano", "Piano", "Piano", "Piano"]
+
+# Drumset "instruments" (style presets). Selecting one of these for a channel turns that channel into a drum track.
+DRUMSET_STYLE_MAP: dict[str, str] = {
+    "Dubstep (Drumset)": "dubstep",
+    "Techno Music (Drumset)": "techno",
+    "Pop (Drumset)": "pop",
+    "Folk (Drumset)": "folk",
+    "Rock (Drumset)": "rock",
+    "Hip-Hop (Drumset)": "hiphop",
+}
+
+DRUM_STYLE_PREFIX: dict[str, str] = {
+    "dubstep": "DUB",
+    "techno": "TEC",
+    "pop": "POP",
+    "folk": "FOL",
+    "rock": "ROC",
+    "hiphop": "HIP",
+}
+
+DRUMKIT_ORDER = ["Kick", "Snare", "Clap", "CHat", "OHat", "Tom", "Crash", "Perc"]
+
+DRUM_VOL = {
+    "Kick": 64,
+    "Snare": 56,
+    "Clap": 52,
+    "CHat": 40,
+    "OHat": 44,
+    "Tom": 50,
+    "Crash": 40,
+    "Perc": 46,
+}
+
+
+def is_drumset_kind(kind: str) -> bool:
+    return (kind or "").strip() in DRUMSET_STYLE_MAP
+
+
+def drumset_style_from_kind(kind: str) -> str | None:
+    return DRUMSET_STYLE_MAP.get((kind or "").strip())
 
 AMIGA_PAL_CLOCK = 7093789.2
 
@@ -1166,6 +1216,191 @@ def make_instrument_sample(kind: str, rng: random.Random, length: int = 32768, s
     if len(data) % 2 == 1:
         data.append(0)
     return bytes(data)
+
+# -----------------------------
+# Drumset sample synthesis (8-bit signed, no loops)
+# -----------------------------
+
+def _floatbuf_to_mod8(buf: list[float], peak: float = 120.0) -> bytes:
+    if not buf:
+        return b"\x00\x00"
+    mx = max(1e-6, max(abs(v) for v in buf))
+    scale = float(peak) / mx
+    data = bytearray()
+    for v in buf:
+        s = int(max(-127, min(127, round(v * scale))))
+        data.append(s & 0xFF)
+    if len(data) % 2 == 1:
+        data.append(0)
+    return bytes(data)
+
+
+def make_drum_sample(style: str, drum: str, rng: random.Random, sr: int = 8287) -> bytes:
+    """Very small procedural drum synth. Result is intended to be played around C-3."""
+    style = (style or "techno").strip().lower()
+    drum = (drum or "Kick").strip()
+
+    # base params by style
+    if style in ("dubstep",):
+        drive = 1.65
+        tight = 0.85
+    elif style in ("hiphop",):
+        drive = 1.45
+        tight = 0.95
+    elif style in ("folk",):
+        drive = 1.10
+        tight = 1.10
+    elif style in ("rock",):
+        drive = 1.35
+        tight = 0.95
+    else:  # techno/pop default
+        drive = 1.30
+        tight = 1.00
+
+    def tanh(x: float) -> float:
+        return math.tanh(drive * x)
+
+    if drum == "Kick":
+        length = int(sr * (0.42 * tight))
+        length = max(2048, min(8192, length))
+        f_start = 130.0 if style in ("pop","rock","folk") else 110.0
+        f_end = 48.0 if style in ("pop","rock","folk") else 38.0
+        # dubstep/hiphop tend to go deeper
+        if style in ("dubstep","hiphop"):
+            f_start, f_end = 120.0, 32.0
+        click_amt = 0.35 if style in ("techno","dubstep") else 0.22
+        decay = 9.0 / tight
+        phi = 0.0
+        buf: list[float] = [0.0] * length
+        for n in range(length):
+            t = n / sr
+            f = f_end + (f_start - f_end) * math.exp(-t * 18.0)
+            phi += (2.0 * math.pi * f) / sr
+            env = math.exp(-decay * t)
+            x = math.sin(phi) * env
+            # click
+            if t < 0.012:
+                x += (rng.uniform(-1.0, 1.0) * click_amt) * (1.0 - (t / 0.012))
+            buf[n] = tanh(x)
+        return _floatbuf_to_mod8(buf)
+
+    if drum == "Snare":
+        length = int(sr * (0.28 * tight))
+        length = max(1536, min(6144, length))
+        tone_f = 190.0 if style in ("folk","pop") else 210.0
+        noise_amt = 0.95 if style in ("dubstep","techno") else 0.75
+        decay = 18.0 / tight
+        buf = [0.0] * length
+        for n in range(length):
+            t = n / sr
+            env = math.exp(-decay * t)
+            noise = rng.uniform(-1.0, 1.0) * noise_amt
+            tone = math.sin(2 * math.pi * tone_f * t) * (0.25 if style in ("folk",) else 0.18)
+            x = (noise + tone) * env
+            # a short transient
+            if t < 0.008:
+                x += math.sin(2 * math.pi * 3200 * t) * (0.20 * (1.0 - t / 0.008))
+            buf[n] = tanh(x)
+        return _floatbuf_to_mod8(buf)
+
+    if drum == "Clap":
+        length = int(sr * (0.22 * tight))
+        length = max(1024, min(4096, length))
+        decay = 22.0 / tight
+        buf = [0.0] * length
+        # 3–4 bursts
+        bursts = [0.0, 0.012, 0.024, 0.036]
+        if style in ("dubstep","techno"):
+            bursts = [0.0, 0.010, 0.020, 0.032]
+        for n in range(length):
+            t = n / sr
+            env = 0.0
+            for bt in bursts:
+                dt = t - bt
+                if 0.0 <= dt < 0.030:
+                    env += math.exp(-decay * dt)
+            noise = rng.uniform(-1.0, 1.0)
+            x = noise * env * (0.65 if style in ("folk",) else 0.90)
+            buf[n] = tanh(x)
+        return _floatbuf_to_mod8(buf)
+
+    if drum in ("CHat","OHat","Crash"):
+        # noise-based metallic
+        if drum == "CHat":
+            length = int(sr * (0.06 * tight))
+            decay = 65.0 / tight
+            hp = 0.85
+            level = 0.80
+        elif drum == "OHat":
+            length = int(sr * (0.18 * tight))
+            decay = 35.0 / tight
+            hp = 0.80
+            level = 0.75
+        else:  # Crash
+            length = int(sr * (0.55 * tight))
+            decay = 10.5 / tight
+            hp = 0.72
+            level = 0.70
+
+        length = max(512, min(16384, length))
+        buf = [0.0] * length
+        last = 0.0
+        # add a few inharmonic partials for "metal"
+        p1 = 1900.0 + rng.uniform(-120, 120)
+        p2 = 2500.0 + rng.uniform(-140, 140)
+        p3 = 3100.0 + rng.uniform(-180, 180)
+        for n in range(length):
+            t = n / sr
+            env = math.exp(-decay * t)
+            noise = rng.uniform(-1.0, 1.0)
+            # crude highpass: y = x - lp(x)
+            last = last + (noise - last) * (1.0 - hp)
+            hpv = noise - last
+            metal = (math.sin(2*math.pi*p1*t) + 0.7*math.sin(2*math.pi*p2*t) + 0.5*math.sin(2*math.pi*p3*t)) / 2.2
+            x = (hpv * level + metal * (0.20 if drum == "Crash" else 0.08)) * env
+            buf[n] = tanh(x)
+        return _floatbuf_to_mod8(buf)
+
+    if drum == "Tom":
+        length = int(sr * (0.30 * tight))
+        length = max(1536, min(8192, length))
+        f = 140.0 if style in ("folk","pop") else 165.0
+        if style in ("dubstep",):
+            f = 120.0
+        decay = 11.5 / tight
+        phi = 0.0
+        buf = [0.0] * length
+        for n in range(length):
+            t = n / sr
+            phi += (2.0 * math.pi * f) / sr
+            env = math.exp(-decay * t)
+            x = math.sin(phi) * env
+            if t < 0.006:
+                x += rng.uniform(-1.0, 1.0) * 0.12 * (1.0 - t / 0.006)
+            buf[n] = tanh(x)
+        return _floatbuf_to_mod8(buf)
+
+    # Perc: short blip/noise
+    length = int(sr * (0.10 * tight))
+    length = max(512, min(4096, length))
+    decay = 40.0 / tight
+    f = 520.0 + rng.uniform(-60, 60)
+    phi = 0.0
+    buf = [0.0] * length
+    for n in range(length):
+        t = n / sr
+        phi += (2.0 * math.pi * f) / sr
+        env = math.exp(-decay * t)
+        x = (0.55 * math.sin(phi) + 0.45 * rng.uniform(-1.0, 1.0)) * env
+        buf[n] = tanh(x)
+    return _floatbuf_to_mod8(buf)
+
+
+def make_drumkit_samples(style: str, rng: random.Random) -> dict[str, bytes]:
+    out: dict[str, bytes] = {}
+    for d in DRUMKIT_ORDER:
+        out[d] = make_drum_sample(style, d, rng)
+    return out
 
 
 def normalize_instrument_list(insts: list[str] | None) -> list[str]:
@@ -1553,10 +1788,12 @@ def make_patterns(
     scale_mode: str | None = None,
     variation: float = 1.0,
     octave_spans: list[int] | None = None,
+    drum_channels: set[int] | None = None,
 ):
     NUM_CH = 4
     ROWS = 64
     patterns: list[list[list[tuple[str | None, int, int, int]]]] = []
+    drum_ch = set(drum_channels or [])
 
     base_melody_name, base_tpl, base_meta = _pick_base_melody(rng, melody_name)
 
@@ -1675,12 +1912,118 @@ def make_patterns(
         return n
 
     def set_cell(p: int, row: int, ch: int, note: str | None = None, sample: int | None = None, effect: int = 0x00, param: int = 0x00):
+        if ch in drum_ch:
+            # keep drum channels empty here; drum patterns are injected later
+            return
         if note is None:
             samp = 0 if sample is None else sample
         else:
             samp = (ch + 1) if sample is None else sample
         if 0 <= row < 64:
             patterns[p][row][ch] = (apply_octave_policy(note, ch) if note is not None else note, samp, effect, param)
+
+
+    # --- harmony helpers: voice-leading + non-crossing voicings ---
+    def _note_idx(n: str | None) -> int | None:
+        if n is None:
+            return None
+        try:
+            return CHROMATIC.index(n)
+        except ValueError:
+            return None
+
+    def _pc(n: str) -> str:
+        # pitch class incl. accidental marker (e.g. "C-", "C#", "A#")
+        return n[:-1]
+
+    def _tones_for_channel(rt: str, th: str, fi: str, ch: int) -> list[str]:
+        """Chord-tone candidates for a channel, across nearby octaves, respecting octave policy."""
+        out: list[str] = []
+        for t in (rt, th, fi):
+            for sh in (-12, 0, 12):
+                nn = note_shift_safe(t, sh)
+                nn = apply_octave_policy(nn, ch)
+                if nn in CHROMATIC_SET and nn not in out:
+                    out.append(nn)
+        # also allow the bass to reach further down if policy allows
+        if ch == 2:
+            for sh in (-24,):
+                nn = note_shift_safe(rt, sh)
+                nn = apply_octave_policy(nn, ch)
+                if nn in CHROMATIC_SET and nn not in out:
+                    out.append(nn)
+        return out if out else [apply_octave_policy(rt, ch)]
+
+    def _choose_voicing(rt: str, th: str, fi: str, melody_ub: str | None, prev: dict[int, str | None]) -> tuple[str, str, str]:
+        """Pick (top, bass, inner) chord voicing for CH2..CH4.
+
+        Goals:
+        - avoid voice crossing: bass < inner < top
+        - keep accompaniment top (CH2) below the melody on CH1 when possible
+        - minimize motion (voice-leading) vs previous bar
+        """
+        cand_top = _tones_for_channel(rt, th, fi, 1)
+        cand_bass = _tones_for_channel(rt, th, fi, 2)
+        cand_inner = _tones_for_channel(rt, th, fi, 3)
+
+        ub_i = _note_idx(melody_ub) if (melody_ub in CHROMATIC_SET) else None
+
+        def _cost(top_n: str, bass_n: str, inner_n: str) -> float:
+            ti = _note_idx(top_n) or 0
+            bi = _note_idx(bass_n) or 0
+            ii = _note_idx(inner_n) or 0
+
+            cost = 0.0
+            # hard constraints via large penalties
+            if not (bi < ii < ti):
+                cost += 500.0
+            # keep some spacing (avoid clumped unisons)
+            if (ti - ii) < 2:
+                cost += 25.0
+            if (ii - bi) < 2:
+                cost += 25.0
+            # keep CH2 (channel 1 in patterns) below CH1 melody if possible
+            if ub_i is not None and ti >= ub_i:
+                cost += 60.0 + (ti - ub_i) * 2.0
+
+            # preferences: bass=root, inner=third, top=fifth (typical choral triad)
+            if _pc(bass_n) != _pc(rt):
+                cost += 8.0
+            if _pc(inner_n) != _pc(th):
+                cost += 2.5
+            if _pc(top_n) != _pc(fi):
+                cost += 2.0
+
+            # voice-leading vs previous bar
+            for ch, n in ((1, top_n), (2, bass_n), (3, inner_n)):
+                pn = prev.get(ch)
+                if pn is None:
+                    continue
+                pi = _note_idx(pn)
+                ni = _note_idx(n)
+                if pi is None or ni is None:
+                    continue
+                d = abs(ni - pi)
+                cost += d * (1.0 if ch != 2 else 0.8)  # bass can move a bit more
+                if d >= 10:
+                    cost += 3.0  # discourage big leaps
+
+            return cost
+
+        best: tuple[str, str, str] | None = None
+        best_cost = 1e18
+        # small combinatorial search (<= 8^3 typical)
+        for bass_n in cand_bass:
+            for inner_n in cand_inner:
+                for top_n in cand_top:
+                    c = _cost(top_n, bass_n, inner_n)
+                    if c < best_cost:
+                        best_cost = c
+                        best = (top_n, bass_n, inner_n)
+
+        if best is None:
+            return cand_top[0], cand_bass[0], cand_inner[0]
+        return best
 
     # 20 progressions (degree in major scale) - designed to stay "choral" but offer more variety
     progs = [
@@ -1753,6 +2096,7 @@ def make_patterns(
 
     for p_idx in range(N_PAT):
         prog = progs[p_idx]
+        prev_voice: dict[int, str | None] = {1: None, 2: None, 3: None}
         for bar, deg in enumerate(prog):
             r0 = bar * 16
             start_row = r0
@@ -1790,19 +2134,26 @@ def make_patterns(
                         root, third, fifth, chord_up = rrt, rth, rfi, cu
                         break
 
-            bass = note_shift_safe(root, -12)
-            top = fifth
+            # choose a non-crossing triad voicing (keeps accompaniment chord-consistent and "in tune")
+            melody_ub = strong_note if (strong_note is not None and strong_note in CHROMATIC_SET) else None
+            top, bass, inner = _choose_voicing(root, third, fifth, melody_ub, prev_voice)
+            prev_voice[1] = top
+            prev_voice[2] = bass
+            prev_voice[3] = inner
 
             # basic harmony bed
             set_cell(p_idx, start_row, 1, top)
             set_cell(p_idx, start_row, 2, bass)
-            set_cell(p_idx, start_row, 3, third)
+            set_cell(p_idx, start_row, 3, inner)
 
             # Harmony density can be nudged by variation.
             dens = max(0.15, min(0.90, 0.35 + 0.35 * max(0.0, min(1.5, float(variation)))) )
             if p_idx != 3 and rng.random() < dens:
                 set_cell(p_idx, start_row + 8, 1, top)
                 set_cell(p_idx, start_row + 8, 2, bass)
+                # occasionally repeat the inner voice too, to glue the harmony together
+                if rng.random() < (0.55 * dens):
+                    set_cell(p_idx, start_row + 8, 3, inner)
 
             # pad pattern
             if p_idx == 3:
@@ -2006,6 +2357,8 @@ def make_patterns(
             for row in range(r0, r0 + 16):
                 # accompaniment channels: force chord tones
                 for ch in (1, 2, 3):
+                    if ch in drum_ch:
+                        continue
                     note, samp, eff, par = pat[row][ch]
                     if note is not None and note not in allowed:
                         pat[row][ch] = (_nearest_note(note, allowed), samp, eff, par)
@@ -2030,6 +2383,173 @@ def make_patterns(
         pat[0][1] = (n, s, 0x0F, bpm)
 
     return patterns, key_root, base_melody_name, base_meta, derive_used
+
+def apply_drumsets_to_patterns(
+    patterns: list,
+    rng: random.Random,
+    drum_channel_styles: dict[int, str],
+    drum_sample_numbers: dict[str, dict[str, int]],
+    variation: float = 1.0,
+) -> None:
+    """Overwrite selected channels with style-appropriate drum patterns.
+
+    Patterns are assumed to be 64 rows, 4 bars of 16 rows.
+    Notes are placed at C-3 (fixed) and instruments switch via sample numbers.
+    """
+    if not drum_channel_styles:
+        return
+
+    v = float(variation) if (variation == variation) else 1.0
+    v = max(0.0, min(1.5, v))
+
+    def _pick(style: str, name: str) -> int | None:
+        m = drum_sample_numbers.get(style, {})
+        return int(m.get(name)) if name in m else None
+
+    def _hit(pat, row: int, ch: int, samp: int | None):
+        if samp is None:
+            return
+        if 0 <= row < 64:
+            pat[row][ch] = ("C-3", int(samp), 0x00, 0x00)
+
+    def _is_intense(p_idx: int) -> float:
+        # 0..19 -> 0..1 roughly
+        return max(0.0, min(1.0, p_idx / max(1, (PATTERN_COUNT - 1))))
+
+    for p_idx, pat in enumerate(patterns):
+        # clear drum channels
+        for ch in drum_channel_styles.keys():
+            for r in range(64):
+                pat[r][ch] = (None, 0, 0, 0)
+
+        intensity = _is_intense(p_idx)
+
+        for bar in range(4):
+            base = bar * 16
+            # small per-bar variation
+            local = intensity * (0.65 + 0.35 * rng.random())
+
+            for ch, style in drum_channel_styles.items():
+                st = (style or "techno").lower()
+
+                k = _pick(st, "Kick")
+                s = _pick(st, "Snare")
+                c = _pick(st, "Clap")
+                hh = _pick(st, "CHat")
+                oh = _pick(st, "OHat")
+                tom = _pick(st, "Tom")
+                crash = _pick(st, "Crash")
+                perc = _pick(st, "Perc")
+
+                # --- style templates on a 16-step grid (rows 0..15) ---
+                if st == "techno":
+                    # 4-on-the-floor + offbeat hats + clap
+                    for r in (0, 4, 8, 12):
+                        _hit(pat, base + r, ch, k)
+                    for r in (4, 12):
+                        _hit(pat, base + r, ch, c if c is not None else s)
+                    # offbeats
+                    for r in (2, 6, 10, 14):
+                        _hit(pat, base + r, ch, hh)
+                    # open hat on last offbeat sometimes
+                    if rng.random() < (0.25 + 0.45 * local):
+                        _hit(pat, base + 14, ch, oh)
+                    # extra 16ths when intense
+                    if local > 0.55 and rng.random() < (0.35 + 0.25 * v):
+                        for r in (1, 3, 5, 7, 9, 11, 13, 15):
+                            if rng.random() < 0.55:
+                                _hit(pat, base + r, ch, hh)
+                    # crash at bar start in some later patterns
+                    if bar == 0 and intensity > 0.55 and rng.random() < 0.35:
+                        _hit(pat, base + 0, ch, crash)
+
+                elif st == "dubstep":
+                    # half-time feel: snare on beat 3 (row 8)
+                    _hit(pat, base + 8, ch, s)
+                    if c is not None and rng.random() < 0.55:
+                        _hit(pat, base + 8, ch, c)
+                    # kick placements
+                    _hit(pat, base + 0, ch, k)
+                    if rng.random() < (0.35 + 0.35 * local):
+                        _hit(pat, base + (12 if rng.random() < 0.6 else 10), ch, k)
+                    if local > 0.55 and rng.random() < (0.30 + 0.35 * v):
+                        _hit(pat, base + 14, ch, k)
+                    # hats: syncopated, probabilistic
+                    for r in range(16):
+                        if r in (0, 8):
+                            continue
+                        prob = 0.10 + 0.35 * local + 0.10 * v
+                        if r % 2 == 1:
+                            prob += 0.10
+                        if rng.random() < prob:
+                            _hit(pat, base + r, ch, hh if (r % 4 != 0) else oh)
+                    # occasional tom fill near end of bar
+                    if local > 0.60 and rng.random() < 0.25:
+                        for r in (12, 13, 14, 15):
+                            if rng.random() < 0.55:
+                                _hit(pat, base + r, ch, tom if tom is not None else perc)
+
+                elif st == "hiphop":
+                    # laid-back: kick + snare, hats with swing-ish randomness
+                    for r in (0, 8):
+                        _hit(pat, base + r, ch, k)
+                    for r in (4, 12):
+                        _hit(pat, base + r, ch, s)
+                    # extra kicks
+                    if rng.random() < (0.25 + 0.35 * local):
+                        _hit(pat, base + 10, ch, k)
+                    if rng.random() < (0.20 + 0.25 * local):
+                        _hit(pat, base + 14, ch, k)
+                    # hats
+                    for r in (2, 6, 10, 14):
+                        _hit(pat, base + r, ch, hh)
+                    if local > 0.45 and rng.random() < 0.35:
+                        for r in (3, 7, 11, 15):
+                            if rng.random() < 0.55:
+                                _hit(pat, base + r, ch, hh)
+                    if rng.random() < 0.15:
+                        _hit(pat, base + 12, ch, c if c is not None else perc)
+
+                elif st == "folk":
+                    # simple, "acoustic-ish": kick on 1&3, snare on 2&4, light hats
+                    for r in (0, 8):
+                        _hit(pat, base + r, ch, k)
+                    for r in (4, 12):
+                        _hit(pat, base + r, ch, s)
+                    # hats on offbeats (sparse)
+                    for r in (2, 6, 10, 14):
+                        if rng.random() < (0.55 + 0.20 * v):
+                            _hit(pat, base + r, ch, hh)
+                    if local > 0.60 and rng.random() < 0.22:
+                        _hit(pat, base + 15, ch, perc)
+
+                elif st == "rock":
+                    # straight rock: kick 1&3(+), snare 2&4, 8th hats, occasional crash
+                    for r in (0, 8, 12):
+                        _hit(pat, base + r, ch, k)
+                    for r in (4, 12):
+                        _hit(pat, base + r, ch, s)
+                    for r in (0, 2, 4, 6, 8, 10, 12, 14):
+                        _hit(pat, base + r, ch, hh)
+                    if bar == 0 and rng.random() < (0.22 + 0.25 * local):
+                        _hit(pat, base + 0, ch, crash)
+                    if local > 0.55 and rng.random() < 0.25:
+                        for r in (13, 14, 15):
+                            _hit(pat, base + r, ch, tom if tom is not None else perc)
+
+                else:  # pop / default
+                    # pop groove: kick+snare, 8th hats, light extras
+                    for r in (0, 8, 12):
+                        if rng.random() < 0.85:
+                            _hit(pat, base + r, ch, k)
+                    for r in (4, 12):
+                        _hit(pat, base + r, ch, s)
+                    for r in (0, 2, 4, 6, 8, 10, 12, 14):
+                        _hit(pat, base + r, ch, hh)
+                    if rng.random() < (0.18 + 0.30 * local):
+                        _hit(pat, base + 14, ch, oh)
+                    if local > 0.55 and rng.random() < (0.22 + 0.22 * v):
+                        _hit(pat, base + 15, ch, perc)
 
 def apply_end_slowdown_to_pattern(pattern, rng: random.Random):
     slow_tempo = rng.choice([0x64, 0x5A, 0x50])  # 100 / 90 / 80 BPM
@@ -2159,6 +2679,8 @@ class SongData:
     mute_channels: list[bool]
     stereo_width: float
     octave_spans: list[int] = field(default_factory=lambda: [3, 3, 3, 3])
+    sample_names: list[str] = field(default_factory=list)
+    drum_channel_styles: dict[int, str] = field(default_factory=dict)
 def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
     note, samp, eff, par = cell
     n = note if note is not None else "---"
@@ -2426,6 +2948,8 @@ def generate_song(
     mute_channels: list[bool] | None = None,
     stereo_width: float = 1.0,
     octave_spans: list[int] | None = None,
+    mod_signature: str | None = None,
+    compat_mode: bool = True,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
@@ -2433,17 +2957,68 @@ def generate_song(
     if seed is None:
         seed = random_seed_value()
     rng = random.Random(seed)
+    rng_s = random.Random((int(seed) ^ 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF)
+
+    sig = (mod_signature or DEFAULT_MOD_SIGNATURE).strip()
+    if sig not in MOD_SIGNATURE_CHOICES:
+        sig = DEFAULT_MOD_SIGNATURE
 
     inst_kinds = normalize_instrument_list(instruments)
+    # Determine which channels are drum tracks (based on chosen "instrument").
+    drum_channel_styles: dict[int, str] = {}
+    for ch, k in enumerate(inst_kinds):
+        st = drumset_style_from_kind(k)
+        if st:
+            drum_channel_styles[int(ch)] = str(st)
 
-    # Generate sample bytes (4 slots). If the same instrument is selected, we still keep distinct sample numbers.
+    # --- sample allocation (up to 31 instruments) ---
+    # We keep the first 4 sample slots reserved for the 4 channels (legacy-friendly),
+    # then append drumkit samples as extra instruments (sample numbers 5..31).
     sample_cache: dict[tuple[str, bool], bytes] = {}
     samples_bytes: list[bytes] = []
-    for k in inst_kinds:
-        ck = (k, bool(disable_vibrato))
-        if ck not in sample_cache:
-            sample_cache[ck] = make_instrument_sample(k, rng, f0=REF_F0, disable_vibrato=bool(disable_vibrato))
-        samples_bytes.append(sample_cache[ck])
+    sample_names: list[str] = []
+    sample_vols: list[int] = []
+
+    # channel base samples (1..4)
+    for ch, k in enumerate(inst_kinds):
+        if ch in drum_channel_styles:
+            # keep slot present, but silent (drums are handled via extra instruments)
+            samples_bytes.append(b"\x00\x00")
+            sample_names.append(k)
+            sample_vols.append(0)
+        else:
+            ck = (k, bool(disable_vibrato))
+            if ck not in sample_cache:
+                sample_cache[ck] = make_instrument_sample(k, rng_s, f0=REF_F0, disable_vibrato=bool(disable_vibrato))
+            samples_bytes.append(sample_cache[ck])
+            sample_names.append(k)
+            sample_vols.append(48)
+
+    # drumkits (shared per style)
+    drum_sample_numbers: dict[str, dict[str, int]] = {}
+    unique_styles = []
+    for st in drum_channel_styles.values():
+        if st not in unique_styles:
+            unique_styles.append(st)
+
+    next_no = 5  # sample numbers are 1-based; 1..4 already used
+    for st in unique_styles:
+        kit = make_drumkit_samples(st, rng_s)
+        drum_sample_numbers[st] = {}
+        # If we're close to the 31-sample limit, keep only the core kit first.
+        core_first = ["Kick", "Snare", "Clap", "CHat", "OHat", "Tom", "Crash", "Perc"]
+        for d in core_first:
+            if next_no > 31:
+                break
+            b = kit.get(d)
+            if not b:
+                continue
+            samples_bytes.append(b)
+            prefix = DRUM_STYLE_PREFIX.get(st, st[:3].upper())
+            sample_names.append(f"{prefix} {d}")
+            sample_vols.append(int(DRUM_VOL.get(d, 48)))
+            drum_sample_numbers[st][d] = int(next_no)
+            next_no += 1
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
@@ -2457,7 +3032,12 @@ def generate_song(
         scale_mode=scale_mode,
         variation=variation,
         octave_spans=octave_spans,
+        drum_channels=set(drum_channel_styles.keys()),
     )
+
+    # Inject drum patterns (if any channels use a drumset preset).
+    if drum_channel_styles:
+        apply_drumsets_to_patterns(patterns, rng, drum_channel_styles, drum_sample_numbers, variation=float(variation))
 
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
@@ -2482,15 +3062,16 @@ def generate_song(
     section4 = ["a_dancefloor__", "the_DJ__", "at_poolparty__", "a_busstation__", "in_heaven__", "ready_to_rock__", "disco__", "crazy__", "party__", "roll_around__", "fight__", "a_sausage__", "a_phonecall__"]
     title_txt = f"{rng.choice(section1)}_{rng.choice(section2)}_{rng.choice(section3)}_{rng.choice(section4)}_{rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
-
-    # Instrument headers
+    # Instrument headers (exactly 31)
     insts: list[bytes] = []
-    insts.append(inst_header(inst_kinds[0], samples_bytes[0], volume=48))
-    insts.append(inst_header(inst_kinds[1], samples_bytes[1], volume=48))
-    insts.append(inst_header(inst_kinds[2], samples_bytes[2], volume=48))
-    insts.append(inst_header(inst_kinds[3], samples_bytes[3], volume=48))
-    empty = b"\x00" * 22 + struct.pack(">H", 0) + bytes([0]) + bytes([0]) + struct.pack(">H", 0) + struct.pack(">H", 1)
-    insts += [empty] * 27
+    for nm, sb, vol in zip(sample_names, samples_bytes, sample_vols):
+        insts.append(inst_header(nm, sb, volume=int(vol)))
+    empty_loop = 0 if compat_mode else 1
+    empty = b"\x00" * 22 + struct.pack(">H", 0) + bytes([0]) + bytes([0]) + struct.pack(">H", 0) + struct.pack(">H", empty_loop)
+    if len(insts) < 31:
+        insts += [empty] * (31 - len(insts))
+    else:
+        insts = insts[:31]
 
     song_len = len(order_for_write)
     order_table = bytes(order_for_write + [0] * (128 - len(order_for_write)))
@@ -2500,9 +3081,10 @@ def generate_song(
     for ih in insts:
         mod += ih
     mod += bytes([song_len])
-    mod += bytes([0])  # restart byte
+    restart_byte = 0x7F if compat_mode else 0
+    mod += bytes([restart_byte])  # restart byte
     mod += order_table
-    mod += b"M.K."
+    mod += sig.encode("ascii", "ignore")[:4].ljust(4, b" ")
     mod += pat_data
     for s in samples_bytes:
         mod += s
@@ -2529,6 +3111,8 @@ def generate_song(
         order=order_for_write,
         samples_bytes=samples_bytes,
         samples_float=samples_float,
+        sample_names=sample_names,
+        drum_channel_styles=dict(drum_channel_styles),
         instrument_kinds=inst_kinds,
         speed=int(speed),
         tempo=int(tempo),
@@ -2571,7 +3155,9 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
 
     # channel state
     chan_period = [0, 0, 0, 0]
-    chan_samp = [0, 1, 2, 3]
+    # sample index per channel (0-based into song.samples_float)
+    max_si = max(0, len(song.samples_float) - 1)
+    chan_samp = [min(0, max_si), min(1, max_si), min(2, max_si), min(3, max_si)]
     chan_pos = [0.0, 0.0, 0.0, 0.0]
     chan_vol = [48, 48, 48, 48]
 
@@ -2611,15 +3197,15 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                         continue
                     chan_period[ch] = PERIODS[note]
                     if samp:
-                        # MOD sample numbers 1..31; we only use 1..4
-                        chan_samp[ch] = max(0, min(3, int(samp) - 1))
+                        # MOD sample numbers are 1..31
+                        max_si = max(0, len(song.samples_float) - 1)
+                        chan_samp[ch] = max(0, min(max_si, int(samp) - 1))
                     chan_pos[ch] = 0.0
 
             row_secs = max(0.001, speed * _tick_seconds(tempo))
             n = int(row_secs * out_rate)
-
             # localize for speed
-            sp0, sp1, sp2, sp3 = song.samples_float
+            sp = song.samples_float
             pos0, pos1, pos2, pos3 = chan_pos
             per0, per1, per2, per3 = chan_period
             sidx0, sidx1, sidx2, sidx3 = chan_samp
@@ -2632,7 +3218,10 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                 # channel 0 (L)
                 if per0 > 0:
                     step = _freq_from_period(per0) / out_rate
-                    samp_arr = (sp0, sp1, sp2, sp3)[sidx0]
+                    if 0 <= sidx0 < len(sp):
+                        samp_arr = sp[sidx0]
+                    else:
+                        samp_arr = sp[0] if sp else []
                     i0 = int(pos0)
                     if i0 < len(samp_arr):
                         v = samp_arr[i0] * (vol0 / 64.0)
@@ -2642,7 +3231,10 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                 # channel 1 (R)
                 if per1 > 0:
                     step = _freq_from_period(per1) / out_rate
-                    samp_arr = (sp0, sp1, sp2, sp3)[sidx1]
+                    if 0 <= sidx1 < len(sp):
+                        samp_arr = sp[sidx1]
+                    else:
+                        samp_arr = sp[0] if sp else []
                     i1 = int(pos1)
                     if i1 < len(samp_arr):
                         v = samp_arr[i1] * (vol1 / 64.0)
@@ -2652,7 +3244,10 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                 # channel 2 (R)
                 if per2 > 0:
                     step = _freq_from_period(per2) / out_rate
-                    samp_arr = (sp0, sp1, sp2, sp3)[sidx2]
+                    if 0 <= sidx2 < len(sp):
+                        samp_arr = sp[sidx2]
+                    else:
+                        samp_arr = sp[0] if sp else []
                     i2 = int(pos2)
                     if i2 < len(samp_arr):
                         v = samp_arr[i2] * (vol2 / 64.0)
@@ -2662,7 +3257,10 @@ def render_song_to_pcm16(song: SongData, out_rate: int = 44100, progress_cb=None
                 # channel 3 (L)
                 if per3 > 0:
                     step = _freq_from_period(per3) / out_rate
-                    samp_arr = (sp0, sp1, sp2, sp3)[sidx3]
+                    if 0 <= sidx3 < len(sp):
+                        samp_arr = sp[sidx3]
+                    else:
+                        samp_arr = sp[0] if sp else []
                     i3 = int(pos3)
                     if i3 < len(samp_arr):
                         v = samp_arr[i3] * (vol3 / 64.0)
@@ -3320,7 +3918,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.7.8.4)")
+    root.title("ProTracker MOD Choral Generator (v1.8.0)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -3873,6 +4471,8 @@ def run_gui():
 
     pt_label(adv, "SCALE MODE").grid(row=0, column=0, sticky="w", padx=6, pady=(6, 2))
     scale_mode_var = tk.StringVar(value="Major")
+    modsig_var = tk.StringVar(value=DEFAULT_MOD_SIGNATURE)
+    compat_var = tk.BooleanVar(value=True)
     scale_combo = ttk.Combobox(adv, textvariable=scale_mode_var, values=SCALE_MODE_CHOICES, width=14, style="PT.TCombobox", state="readonly")
     scale_combo.grid(row=0, column=1, sticky="e", padx=6, pady=(6, 2))
     tips.bind(scale_combo, "SCALE MODE")
@@ -4443,6 +5043,8 @@ def run_gui():
                     mute_channels=mutes,
                     stereo_width=stereo_width,
                     octave_spans=spans_used,
+                    mod_signature=modsig_var.get() if 'modsig_var' in locals() else DEFAULT_MOD_SIGNATURE,
+                    compat_mode=compat_var.get() if 'compat_var' in locals() else True,
                 )
                 last_path = path
                 last_song_local = song
@@ -4851,6 +5453,8 @@ def run_gui():
 def main():
     ap = argparse.ArgumentParser(description="Generate churchy ProTracker .MOD files (GUI by default).")
     ap.add_argument("-nogui", action="store_true", help="Run in CLI mode (do not show GUI).")
+    ap.add_argument("-modsig", type=str, default=None, help="MOD signature: M.K. or M!K! (default: M!K!).")
+    ap.add_argument("-nocompat", action="store_true", help="Disable compatibility safeguards (default is ON).")
     ap.add_argument("-speed", type=int, default=None, help="CLI: MOD speed (ticks/row, 1..31).")
     ap.add_argument("-tempo", type=int, default=None, help="CLI: MOD tempo (BPM, 32..255).")
     ap.add_argument("-inst1", type=str, default=None, help=f"CLI: instrument for channel 1. One of: {', '.join(INSTRUMENT_CHOICES)}")
