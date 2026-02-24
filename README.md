@@ -13,6 +13,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Basic drum sets for music styles added
 - Bug fixes
 
+  Note: It might be currently better to change the octave span in channel 3 from 3 to 2 .. there is a little bug in the routine.
+
 <img width="1276" height="961" alt="181" src="https://github.com/user-attachments/assets/2ca455cb-86a3-4234-9e9c-462b703d4692" />
 
 https://github.com/user-attachments/assets/81f24185-98aa-4c3e-8edb-e3b5e04f2bfd
