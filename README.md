@@ -11,7 +11,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 - Tabs added Song / Samples / Options
 - Samples tab let you preview each generated sample, or you could replace it with your own samples
-- Ralph-Loop added in options (to let the script try as hard as it can to find a most harmonic / melody song for a single seed)
+- Ralph-Loop added in options (to let the script try as hard as it can to find a most harmonic / melodic song for a single seed)
 - Empty Pattern Option added to the end of each song to make sure its not just stopping if you dont want to loop it
 - Added another visulizer like a classical disco light
 - Added many more minor options
