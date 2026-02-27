@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v1.8.1)
+# ProTracker MOD Choral Generator (v2.1)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -20,6 +20,14 @@ import wave
 from array import array
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Import harmony analyzer for quality checking
+try:
+    from harmony_analyzer import HarmonyAnalyzer, MusicQualityChecker, analyze_and_improve_music
+    HARMONY_AVAILABLE = True
+except ImportError:
+    HARMONY_AVAILABLE = False
+    print("Warning: Harmony analyzer not available. Quality checking disabled.")
 
 # -----------------------------
 # ProTracker note period table (C-1 .. B-3) for standard Amiga / ProTracker tuning
@@ -88,11 +96,13 @@ DEFAULT_TEMPO = 125
 # "Mixed" blends Major+Minor (modal mixture) while keeping everything harmonically aligned.
 SCALE_MODE_CHOICES = ["Auto", "Major", "Minor", "Mixed", "Dorian", "Mixolydian"]
 
-DEFAULT_ORDER_STR = "5, 5, 1, 5, 10, 3, 4, 2, 5, 0"
+DEFAULT_ORDER_STR = "5, 15, 1, 5, 10, 12, 4, 2, 15, 0"
 
 # How many base patterns are generated (0..PATTERN_COUNT-1).
 PATTERN_COUNT = 20
 ORDER_PRESETS = [
+    # User's preferred order (default)
+    "5, 15, 1, 5, 10, 12, 4, 2, 15, 0",
     # legacy / compact
     "0, 1, 2, 3, 2, 4, 5",
     "0, 1, 2, 3, 2, 4, 1, 4, 2, 5",
@@ -2770,6 +2780,8 @@ class SongData:
     octave_spans: list[int] = field(default_factory=lambda: [3, 3, 3, 3])
     sample_names: list[str] = field(default_factory=list)
     drum_channel_styles: dict[int, str] = field(default_factory=dict)
+    harmony_score: float = 0.0
+    fadeout_pattern: bool = False
 def _cell_to_text(cell: tuple[str | None, int, int, int]) -> str:
     note, samp, eff, par = cell
     n = note if note is not None else "---"
@@ -3039,6 +3051,8 @@ def generate_song(
     octave_spans: list[int] | None = None,
     mod_signature: str | None = None,
     compat_mode: bool = True,
+    fadeout_pattern: bool = False,
+    quality_passes: int = 3,
 ) -> tuple[Path, SongData]:
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
@@ -3130,6 +3144,47 @@ def generate_song(
     if drum_channel_styles:
         apply_drumsets_to_patterns(patterns, rng, drum_channel_styles, drum_sample_numbers, variation=float(variation))
 
+    # ==========================================
+    # QUALITY CHECKING WITH HARMONY ANALYSIS (configurable passes)
+    # ==========================================
+    harmony_score = 0.0
+    if HARMONY_AVAILABLE and quality_passes > 0:
+        quality_checker = MusicQualityChecker(quality_threshold=70.0)
+        scale_mode_clean = str(scale_mode or 'major').strip().lower()
+        if scale_mode_clean in ('auto', 'random'):
+            scale_mode_clean = 'major'
+        
+        last_quality = None
+        for pass_num in range(min(quality_passes, 5)):  # max 5 passes
+            if pass_num == 0:
+                # Pass 1: Basic harmonic analysis
+                quality = quality_checker.check_quality_first_pass(patterns, scale_mode_clean, key_root)
+                print(f"[Quality Check] Pass 1 - Overall: {quality.overall_score:.1f}, Harmony: {quality.harmony_score:.1f}")
+            elif pass_num == 1:
+                # Pass 2: Chord progression analysis
+                quality = quality_checker.check_quality_second_pass(patterns, scale_mode_clean, key_root)
+                print(f"[Quality Check] Pass 2 - Overall: {quality.overall_score:.1f}, Melody: {quality.melody_score:.1f}")
+            else:
+                # Pass 3+: Final verification
+                quality = quality_checker.check_quality_third_pass(patterns, scale_mode_clean, key_root)
+                print(f"[Quality Check] Pass {pass_num+1} (Final) - Overall: {quality.overall_score:.1f}")
+            
+            last_quality = quality
+            if not quality.passed:
+                print(f"[Quality Check] Pass {pass_num+1} FAILED - Issues: {quality.issues}")
+            else:
+                print(f"[Quality Check] Pass {pass_num+1} PASSED - Strengths: {quality.strengths}")
+                harmony_score = quality.overall_score
+                break  # Stop early if quality is good
+        
+        if last_quality and not last_quality.passed:
+            print(f"[Quality Check] All {quality_passes} passes completed. Final issues: {last_quality.issues}")
+            harmony_score = last_quality.overall_score
+    
+    # Inject drum patterns (if any channels use a drumset preset).
+    if drum_channel_styles:
+        apply_drumsets_to_patterns(patterns, rng, drum_channel_styles, drum_sample_numbers, variation=float(variation))
+
     if order is None:
         order = parse_order_string(DEFAULT_ORDER_STR)
     validate_order(order, n_patterns=len(patterns))
@@ -3137,6 +3192,15 @@ def generate_song(
     order_original = list(order)
 
     order_for_write = list(order)
+    
+    # Add fade-out pattern if requested (empty pattern for natural instrument decay)
+    if fadeout_pattern and len(order_for_write) > 0:
+        # Create an empty pattern (all channels: no note, no sample, no effect)
+        empty_pattern = [[(None, 0, 0, 0) for _ in range(4)] for _ in range(64)]
+        patterns.append(empty_pattern)
+        order_for_write.append(len(patterns) - 1)
+        print(f"[MOD] Added empty fade-out pattern at position {len(patterns) - 1}")
+    
     if enable_slowdown and len(order_for_write) > 0:
         src_pat = order_for_write[-1]
         ending_pat = [list(row) for row in patterns[src_pat]]
@@ -3218,6 +3282,8 @@ def generate_song(
         octave_spans=(
             [int(octave_spans[i]) if octave_spans is not None and i < len(octave_spans) else 3 for i in range(4)]
         ),
+        harmony_score=harmony_score,
+        fadeout_pattern=bool(fadeout_pattern),
     )
 
     return path, song
@@ -3960,6 +4026,148 @@ class OscilloscopeView:
 
         self._cleared = False
 
+class LightOrganView:
+    """Classic light organ visualization with color bars responding to frequency bands."""
+
+    def __init__(self, canvas, width: int = 560, height: int = 160):
+        self.canvas = canvas
+        self.width = int(width)
+        self.height = int(height)
+        self._pad = 6
+        self._cleared = True
+
+        self.canvas.configure(width=self.width, height=self.height, bg="#1a1a1a", highlightthickness=0)
+
+        # Classic light organ colors: Low=red, Mid=orange/yellow, High=green
+        self._colors = ["#ff0000", "#ff4400", "#ff8800", "#ffaa00", "#ffcc00", "#88ff00", "#44ff00", "#00ff00"]
+        self._n_bands = len(self._colors)
+
+        self._bar_ids: list[int] = []
+        self._glow_ids: list[int] = []
+
+        # Calculate bar dimensions
+        slot_w = (self.width - 2 * self._pad) / self._n_bands
+
+        for i, color in enumerate(self._colors):
+            x0 = self._pad + i * slot_w
+            x1 = x0 + slot_w - 4
+
+            # Glow effect (larger, semi-transparent looking)
+            glow = self.canvas.create_rectangle(x0 - 2, self.height - self._pad,
+                                               x1 + 2, self.height - self._pad,
+                                               outline="", fill=color, stipple="gray50")
+            self._glow_ids.append(glow)
+
+            # Main bar
+            bar = self.canvas.create_rectangle(x0, self.height - self._pad,
+                                              x1, self.height - self._pad,
+                                              outline="", fill=color)
+            self._bar_ids.append(bar)
+
+        self._levels = [0.0] * self._n_bands
+        self._slot_w = slot_w
+
+    def reset(self):
+        self._cleared = True
+        self._levels = [0.0] * self._n_bands
+        y_bottom = self.height - self._pad
+        for bar_id, glow_id in zip(self._bar_ids, self._glow_ids):
+            self.canvas.coords(bar_id,
+                              self.canvas.coords(bar_id)[0], y_bottom,
+                              self.canvas.coords(bar_id)[2], y_bottom)
+            # Reset glow
+            glow_coords = list(self.canvas.coords(glow_id))
+            glow_coords[1] = y_bottom
+            glow_coords[3] = y_bottom
+            self.canvas.coords(glow_id, *glow_coords)
+
+    def _compute_levels(self, mono: list[float], sr: int) -> list[float]:
+        """Simple frequency band analysis."""
+        n = len(mono)
+        if n < 64:
+            return [0.0] * self._n_bands
+
+        if _HAS_NUMPY:
+            x = _np.array(mono, dtype=_np.float32)
+            # Simple energy in 3 frequency bands (low, mid, high)
+            spec = _np.abs(_np.fft.rfft(x))
+            freqs = _np.fft.rfftfreq(n, 1.0 / sr)
+
+            # Map to 8 light organ bands
+            bands = []
+            f_edges = [60, 150, 300, 600, 1200, 2400, 4800, 8000, 12000]
+            for i in range(self._n_bands):
+                f0, f1 = f_edges[i], f_edges[i + 1]
+                idx = _np.where((freqs >= f0) & (freqs < f1))[0]
+                if idx.size == 0:
+                    bands.append(0.0)
+                else:
+                    # RMS of band
+                    energy = float(_np.sqrt(_np.mean(spec[idx] ** 2)))
+                    bands.append(energy)
+            return bands
+        else:
+            # Fallback: time-domain energy with simple bandpass simulation
+            # Just use overall energy distributed across bands
+            energy = sum(x * x for x in mono) / max(1, len(mono))
+            energy = math.sqrt(energy)
+            # Create a fake distribution
+            return [energy * (0.5 + 0.5 * math.sin(i * 0.5)) for i in range(self._n_bands)]
+
+    def update_from_pcm(self, pcm16: bytes, sr: int, sample_index: int, window: int = 1024):
+        if not pcm16:
+            return
+        total_frames = len(pcm16) // 4
+        if total_frames <= 0:
+            return
+
+        i0 = max(0, min(total_frames - 1, int(sample_index)))
+        i1 = min(total_frames, i0 + int(window))
+        if i1 - i0 < 64:
+            return
+
+        # Extract mono window
+        mono: list[float] = []
+        off = i0 * 4
+        end = i1 * 4
+        for j in range(off, end, 4):
+            l = int.from_bytes(pcm16[j : j + 2], byteorder="little", signed=True)
+            r = int.from_bytes(pcm16[j + 2 : j + 4], byteorder="little", signed=True)
+            mono.append(((l + r) * 0.5) / 32768.0)
+
+        raw = self._compute_levels(mono, sr)
+
+        # Normalize and smooth
+        mx = max(1e-9, max(raw))
+        for i in range(self._n_bands):
+            v = raw[i] / mx
+            v = math.sqrt(v)  # Mild compression
+            self._levels[i] = self._levels[i] * 0.6 + v * 0.4  # Smooth
+
+        self._cleared = False
+
+        # Draw bars
+        y_bottom = self.height - self._pad
+        full_h = self.height - 2 * self._pad
+
+        for i, (bar_id, glow_id) in enumerate(zip(self._bar_ids, self._glow_ids)):
+            level = max(0.0, min(1.0, self._levels[i]))
+            h = full_h * level
+
+            x0 = self._pad + i * self._slot_w
+            x1 = x0 + self._slot_w - 4
+
+            y0 = y_bottom - h
+
+            # Update main bar
+            self.canvas.coords(bar_id, x0, y0, x1, y_bottom)
+
+            # Update glow (slightly larger)
+            glow_h = h * 1.2
+            glow_y0 = y_bottom - glow_h
+            self.canvas.coords(glow_id, x0 - 2, glow_y0, x1 + 2, y_bottom)
+
+
 # -----------------------------
 # GUI (ProTracker-ish style)
 # -----------------------------
@@ -4009,7 +4217,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v1.8.1)")
+    root.title("ProTracker MOD Choral Generator (v2.1)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -4043,7 +4251,11 @@ def run_gui():
 
     base_font = ("Courier New", 10, "bold")
 
-    style.configure("PT.TButton", font=base_font, padding=(8, 3), relief="raised")
+    style.configure("PT.TButton", font=base_font, padding=(8, 3), background="#9b9b9b", foreground="#000000")
+    # Map disabled state to ensure visual feedback
+    style.map("PT.TButton",
+              foreground=[('disabled', '#666666'), ('active', '#000000'), ('!disabled', '#000000')],
+              background=[('disabled', '#999999'), ('active', '#b0b0b0'), ('!disabled', '#9b9b9b')])
     style.configure("PT.TLabel", font=base_font, background="#8f8f8f", foreground="#1a1a1a")
     style.configure("PT.TFrame", background="#8f8f8f")
     style.configure("PT.TCheckbutton", font=base_font, background="#8f8f8f")
@@ -4102,9 +4314,27 @@ def run_gui():
             "Export rendered songs as WAV": "Export rendered songs as WAV",
             "Save song parameters": "Save song parameters",
             "Disable vibrato in samples": "Disable vibrato in samples",
+            "Add empty fade-out pattern": "Add empty fade-out pattern",
+            "Ralph-Loop": "RALPH-LOOP",
+            "PASSES": "PASSES",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
             
-            "OCTAVE SPAN": "OCTAVE SPAN","GENERATE": "GENERATE",
+            "OCTAVE SPAN": "OCTAVE SPAN",
+            "CH1": "CH1",
+            "CH2": "CH2",
+            "CH3": "CH3",
+            "CH4": "CH4",
+            "HARMONY": "Harmony Score",
+            "SAMPLES": "SAMPLES",
+            "Sample Manager": "Sample Manager",
+            "Import WAV": "Import WAV",
+            "Play Sample": "Play",
+            "Replace Sample": "Replace",
+            "Reset Sample": "Reset",
+            "Generated": "Generated",
+            "Custom": "Custom",
+            "Volume": "Volume",
+            "Sample": "Sample","GENERATE": "GENERATE",
             "PLAY": "PLAY",
             "STOP": "STOP",
             "OPEN OUTPUT": "OPEN OUTPUT",
@@ -4113,6 +4343,8 @@ def run_gui():
             "ADD AS PLUGIN": "ADD AS PLUGIN",
             "SPECTRUM ANALYZER": "SPECTRUM ANALYZER",
             "STEREO SCOPES": "STEREO SCOPES",
+            "LIGHT ORGAN": "LIGHT ORGAN",
+            "RE-GENERATE": "RE-GENERATE",
             "Click visualizer to toggle Spectrum / Scopes": "Click visualizer to toggle Spectrum / Scopes",
             "PATTERN PREVIEW": "PATTERN PREVIEW",
             "Generate a song, then hit PLAY.": "Generate a song, then hit PLAY.",
@@ -4138,9 +4370,26 @@ def run_gui():
             "Export rendered songs as WAV": "Gerenderte Songs als WAV exportieren",
             "Save song parameters": "Song-Parameter speichern",
             "Disable vibrato in samples": "Vibrato in Samples deaktivieren",
+            "Add empty fade-out pattern": "Leeren Fade-Out-Pattern hinzufügen",
+            "PASSES": "DURCHLÄUFE",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTE (CH1..CH4)",
             
-            "OCTAVE SPAN": "OKTAVEN","GENERATE": "GENERIEREN",
+            "OCTAVE SPAN": "OKTAVEN",
+            "CH1": "CH1",
+            "CH2": "CH2",
+            "CH3": "CH3",
+            "CH4": "CH4",
+            "HARMONY": "Harmonie-Score",
+            "SAMPLES": "SAMPLES",
+            "Sample Manager": "Sample Manager",
+            "Import WAV": "WAV importieren",
+            "Play Sample": "Abspielen",
+            "Replace Sample": "Ersetzen",
+            "Reset Sample": "Zurücksetzen",
+            "Generated": "Generiert",
+            "Custom": "Benutzerdefiniert",
+            "Volume": "Lautstärke",
+            "Sample": "Sample","GENERATE": "GENERIEREN",
             "PLAY": "ABSPIELEN",
             "STOP": "STOP",
             "OPEN OUTPUT": "AUSGABE ÖFFNEN",
@@ -4149,6 +4398,8 @@ def run_gui():
             "ADD AS PLUGIN": "ALS PLUGIN HINZUFÜGEN",
             "SPECTRUM ANALYZER": "SPEKTRUM-ANALYSATOR",
             "STEREO SCOPES": "STEREO-OSZILLOSCOPE",
+            "LIGHT ORGAN": "LICHTORGEL",
+            "RE-GENERATE": "NEU-GENERIEREN",
             "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: Spektrum / Scopes",
             "PATTERN PREVIEW": "PATTERN-VORSCHAU",
             "Generate a song, then hit PLAY.": "Song generieren, dann PLAY drücken.",
@@ -4174,9 +4425,27 @@ def run_gui():
             "Export rendered songs as WAV": "Exporter en WAV",
             "Save song parameters": "Sauver les paramètres",
             "Disable vibrato in samples": "Désactiver le vibrato",
+            "Add empty fade-out pattern": "Ajouter un pattern de fade-out vide",
+            "Ralph-Loop": "BOUCLE RALPH",
+            "PASSES": "PASSES",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
             
-            "OCTAVE SPAN": "OCTAVES","GENERATE": "GÉNÉRER",
+            "OCTAVE SPAN": "OCTAVES",
+            "CH1": "CH1",
+            "CH2": "CH2",
+            "CH3": "CH3",
+            "CH4": "CH4",
+            "HARMONY": "Score d'harmonie",
+            "SAMPLES": "SAMPLES",
+            "Sample Manager": "Gestion des échantillons",
+            "Import WAV": "Importer WAV",
+            "Play Sample": "Lecture",
+            "Replace Sample": "Remplacer",
+            "Reset Sample": "Réinitialiser",
+            "Generated": "Généré",
+            "Custom": "Personnalisé",
+            "Volume": "Volume",
+            "Sample": "Échantillon","GENERATE": "GÉNÉRER",
             "PLAY": "JOUER",
             "STOP": "STOP",
             "OPEN OUTPUT": "OUVRIR SORTIE",
@@ -4185,6 +4454,8 @@ def run_gui():
             "ADD AS PLUGIN": "AJOUTER COMME PLUGIN",
             "SPECTRUM ANALYZER": "ANALYSEUR DE SPECTRE",
             "STEREO SCOPES": "OSCILLOSCOPE STÉRÉO",
+            "LIGHT ORGAN": "ORGUE LUMINEUX",
+            "RE-GENERATE": "RE-GÉNÉRER",
             "Click visualizer to toggle Spectrum / Scopes": "Cliquer: Spectre / Oscillos",
             "PATTERN PREVIEW": "APERÇU PATTERN",
             "Generate a song, then hit PLAY.": "Générez un morceau, puis PLAY.",
@@ -4194,7 +4465,7 @@ def run_gui():
     TT_STR = {
         "en": {
             "LANGUAGE": "Select the UI language (labels + tooltips).",
-            "Click visualizer to toggle Spectrum / Scopes": "Click the visualizer to switch between Spectrum and Channel Scopes.",
+            "Click visualizer to toggle Spectrum / Scopes": "Click the visualizer to switch between Spectrum, Channel Scopes, and Light Organ.",
             "PATTERN ORDER": "Pattern playback order. You can type or pick a preset.",
             "SMART": "Generate a musically sensible order automatically.",
             "BASE MELODY": "Choose a base melody plugin. 'Pure Random' uses algorithmic melody.",
@@ -4213,8 +4484,24 @@ def run_gui():
             "Export rendered songs as WAV": "Save preview rendering as .wav next to the .mod.",
             "Save song parameters": "Save song parameters as .txt next to the .mod.",
             "Disable vibrato in samples": "Disable vibrato in synthesized instruments (more stable pitch).",
-            
-            "OCTAVE SPAN": "Per channel: how many octaves (around the base key octave) notes may use. 1=only base octave, 3=base±1.","GENERATE": "Generate a new .mod using the current settings.",
+            "Add empty fade-out pattern": "Adds an empty pattern at the end so instruments can fade out naturally instead of stopping abruptly.",
+            "Ralph-Loop": "Ralph-Loop: keep regenerating until Harmony+Melody score reaches 90% (keeps best attempt if the target is not reached).",
+            "PASSES": "Number of quality check passes (more passes = better harmony).",
+            "OCTAVE SPAN": "Per channel: how many octaves (around the base key octave) notes may use. 1=only base octave, 3=base±1.",
+            "CH1": "Channel 1 instrument and octave span.",
+            "CH2": "Channel 2 instrument and octave span.",
+            "CH3": "Channel 3 instrument and octave span.",
+            "CH4": "Channel 4 instrument and octave span.",
+            "HARMONY": "Harmonic quality score based on music theory analysis.",
+            "SAMPLES": "Manage and replace instrument samples.",
+            "Sample Manager": "View and manage instrument samples. Import custom WAV files to replace generated samples.",
+            "Import WAV": "Import a custom WAV file to replace the selected sample.",
+            "Play Sample": "Preview the selected sample.",
+            "Replace Sample": "Replace generated sample with custom WAV.",
+            "Reset Sample": "Reset to generated sample.",
+            "Generated": "Procedurally generated sample.",
+            "Custom": "User-imported custom sample.",
+            "Volume": "Sample volume level.","GENERATE": "Generate a new .mod using the current settings.",
             "PLAY": "Render preview audio and play it.",
             "STOP": "Stop playback.",
             "OPEN OUTPUT": "Open the output folder (mods_out).",
@@ -4222,10 +4509,11 @@ def run_gui():
             "REFRESH": "Reload melody plugins from disk.",
             "ADD AS PLUGIN": "Export the last generated song as a new melody plugin folder.",
             "PATTERN PREVIEW": "Preview patterns as tracker-like text. Select pattern number.",
+            "RE-GENERATE": "Regenerate the current song with a new pattern order.",
         },
         "de": {
             "LANGUAGE": "GUI-Sprache auswählen (Labels + Tooltips).",
-            "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: zwischen Spektrum und Kanal-Scopes umschalten.",
+            "Click visualizer to toggle Spectrum / Scopes": "Visualizer klicken: zwischen Spektrum, Kanal-Scopes und Lichtorgel umschalten.",
             "PATTERN ORDER": "Pattern-Abspielreihenfolge. Du kannst tippen oder ein Preset wählen.",
             "SMART": "Erzeugt automatisch eine musikalisch sinnvolle Reihenfolge.",
             "BASE MELODY": "Basismelodie wählen. 'Pure Random' erzeugt die Melodie algorithmisch.",
@@ -4237,26 +4525,44 @@ def run_gui():
             "VARIATION": "Variationsstärke: höher = mehr Drive/Ornamente.",
             "SEED (optional)": "Seed für reproduzierbare Generierung. Gleicher Seed = gleicher Song.",
             "NEW SEED EACH GENERATE": "Wenn aktiv, nutzt jede Generierung einen neuen Zufalls-Seed (deaktivieren = Seed wiederverwenden).",
-            "BATCH": "Mehrere Songs in einem Lauf generieren (Seeds zählen hoch).",
+            "BATCH": "Mehrere Songs in einem Lauf generieren (Seeds count up).",
             "MUTE CH": "Kanäle im Preview stummschalten.",
             "STEREO %": "Stereo-Breite für den Preview-Render.",
             "Enable slowdown to the end of the song": "Verlangsamung nur ganz am Ende anwenden.",
             "Export rendered songs as WAV": "Preview als .wav neben der .mod speichern.",
             "Save song parameters": "Song-Parameter als .txt neben der .mod speichern.",
             "Disable vibrato in samples": "Vibrato in Synth-Instrumenten deaktivieren (stabilere Tonhöhe).",
-            
-            "OCTAVE SPAN": "Pro Kanal: über wie viele Oktaven (um die Basis-Oktave) Noten verteilt sein dürfen. 1=nur Basis-Oktave, 3=Basis±1.","GENERATE": "Erzeugt eine neue .mod Datei mit den aktuellen Einstellungen.",
+            "Add empty fade-out pattern": "Fügt einen leeren Pattern am Ende hinzu, damit Instrumente natürlich ausklingen können.",
+            "Ralph-Loop": "Ralph-Loop: Generiert so lange neu, bis Harmonie+Melodie mindestens 90% erreichen (oder behält den besten Versuch, falls das Ziel nicht erreicht wird).",
+            "PASSES": "Anzahl der Qualitätsprüf-Durchläufe (mehr = bessere Harmonie).",
+            "OCTAVE SPAN": "Pro Kanal: über wie viele Oktaven (um die Basis-Oktave) Noten verteilt sein dürfen. 1=nur Basis-Oktave, 3=Basis±1.",
+            "CH1": "Kanal 1 Instrument und Oktav-Spanne.",
+            "CH2": "Kanal 2 Instrument und Oktav-Spanne.",
+            "CH3": "Kanal 3 Instrument und Oktav-Spanne.",
+            "CH4": "Kanal 4 Instrument und Oktav-Spanne.",
+            "HARMONY": "Harmonische Qualitätsbewertung basierend auf Musiktheorie-Analyse.",
+            "SAMPLES": "Instrument-Samples verwalten und ersetzen.",
+            "Sample Manager": "Samples anzeigen und verwalten. Eigene WAV-Dateien importieren.",
+            "Import WAV": "Eigene WAV-Datei importieren.",
+            "Play Sample": "Vorschau des ausgewählten Samples.",
+            "Replace Sample": "Generiertes Sample durch eigenes WAV ersetzen.",
+            "Reset Sample": "Zurück zum generierten Sample.",
+            "Generated": "Prozedural generiertes Sample.",
+            "Custom": "Benutzerdefiniertes Sample.",
+            "Volume": "Sample-Lautstärke.","GENERATE": "Erzeugt eine neue .mod Datei mit den aktuellen Einstellungen.",
             "PLAY": "Preview rendern und abspielen.",
             "STOP": "Playback stoppen.",
             "OPEN OUTPUT": "Ausgabeordner öffnen (mods_out).",
             "OPEN PLUGINS": "Plugin-Ordner öffnen (melody_plugins).",
             "REFRESH": "Plugins neu einlesen.",
-            "ADD AS PLUGIN": "Letzten Song als neues Plugin exportieren.",
+            "ADD AS PLUGIN": "Export the last generated song as a new melody plugin folder.",
             "PATTERN PREVIEW": "Pattern-Vorschau (Tracker-Text). Pattern auswählen.",
+            "RE-GENERATE": "Aktuellen Song mit neuer Pattern-Reihenfolge neu generieren.",
+            "LIGHT ORGAN": "Song als Lichtorgel visualisieren.",
         },
         "fr": {
             "LANGUAGE": "Choisir la langue (libellés + info-bulles).",
-            "Click visualizer to toggle Spectrum / Scopes": "Cliquer pour basculer Spectre / Oscilloscope.",
+            "Click visualizer to toggle Spectrum / Scopes": "Cliquer pour basculer Spectre / Oscilloscope / Orgue lumineux.",
             "PATTERN ORDER": "Ordre de lecture des patterns. Saisir ou choisir un preset.",
             "SMART": "Génère automatiquement un ordre musical cohérent.",
             "BASE MELODY": "Choisir une mélodie plugin. 'Pure Random' = mélodie algorithmique.",
@@ -4275,8 +4581,24 @@ def run_gui():
             "Export rendered songs as WAV": "Enregistrer l'aperçu en .wav à côté du .mod.",
             "Save song parameters": "Enregistrer les paramètres en .txt à côté du .mod.",
             "Disable vibrato in samples": "Désactiver le vibrato (hauteur plus stable).",
-            
-            "OCTAVE SPAN": "Par canal : nombre d’octaves autorisées (autour de l’octave de base). 1=octave de base, 3=base±1.","GENERATE": "Générer un nouveau .mod avec les réglages actuels.",
+            "Add empty fade-out pattern": "Ajoute un pattern vide à la fin pour laisser les instruments s'éteindre naturellement.",
+            "Ralph-Loop": "Boucle Ralph : régénère jusqu'à obtenir Harmonie+Mélodie ≥ 90% (ou garde la meilleure tentative si le seuil n'est pas atteint).",
+            "PASSES": "Nombre de passes de vérification qualité (plus = meilleure harmonie).",
+            "OCTAVE SPAN": "Par canal : nombre d’octaves autorisées (autour de l’octave de base). 1=octave de base, 3=base±1.",
+            "CH1": "Canal 1 instrument et étendue d'octaves.",
+            "CH2": "Canal 2 instrument et étendue d'octaves.",
+            "CH3": "Canal 3 instrument et étendue d'octaves.",
+            "CH4": "Canal 4 instrument et étendue d'octaves.",
+            "HARMONY": "Score de qualité harmonique basé sur l'analyse musicale.",
+            "SAMPLES": "Gérer et remplacer les échantillons.",
+            "Sample Manager": "Gérer les échantillons. Importer des fichiers WAV personnalisés.",
+            "Import WAV": "Importer un fichier WAV personnalisé.",
+            "Play Sample": "Aperçu de l'échantillon sélectionné.",
+            "Replace Sample": "Remplacer par un WAV personnalisé.",
+            "Reset Sample": "Réinitialiser l'échantillon.",
+            "Generated": "Échantillon généré.",
+            "Custom": "Échantillon personnalisé.",
+            "Volume": "Niveau de volume.","GENERATE": "Générer un nouveau .mod avec les réglages actuels.",
             "PLAY": "Rendre l'aperçu audio et le lire.",
             "STOP": "Arrêter la lecture.",
             "OPEN OUTPUT": "Ouvrir le dossier de sortie (mods_out).",
@@ -4284,6 +4606,7 @@ def run_gui():
             "REFRESH": "Recharger les plugins.",
             "ADD AS PLUGIN": "Exporter le dernier morceau comme plugin.",
             "PATTERN PREVIEW": "Aperçu des patterns (texte tracker).",
+            "RE-GENERATE": "Régénérer le morceau actuel avec un nouvel ordre de patterns.",
         },
     }
 
@@ -4578,7 +4901,7 @@ def run_gui():
     seed_var = tk.StringVar(value="")
     seed_row = tk.Frame(adv, bg="#8f8f8f")
     seed_row.grid(row=2, column=1, sticky="e", padx=6, pady=(2, 2))
-    seed_entry = tk.Entry(seed_row, textvariable=seed_var, width=10, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
+    seed_entry = tk.Entry(seed_row, textvariable=seed_var, width=16, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
     seed_entry.pack(side="left")
     tips.bind(seed_entry, "SEED (optional)")
     rnd_seed_btn = ttk.Button(seed_row, text=tr("RND"), style="PT.TButton", command=lambda: seed_var.set(str(random_seed_value())))
@@ -4613,7 +4936,19 @@ def run_gui():
     width_scale.grid(row=6, column=1, sticky="e", padx=6, pady=(0, 6))
     tips.bind(width_scale, "STEREO %")
 
+    pt_label(adv, "PASSES").grid(row=7, column=0, sticky="w", padx=6, pady=(2, 6))
+    passes_var = tk.IntVar(value=3)
+    passes_combo = ttk.Combobox(adv, textvariable=passes_var, values=["1", "2", "3", "4", "5"], width=6, style="PT.TCombobox", state="readonly")
+    passes_combo.grid(row=7, column=1, sticky="e", padx=6, pady=(2, 6))
+    tips.bind(passes_combo, "Quality check passes (more = better harmony)")
 
+    slowdown_var = tk.BooleanVar(value=False)
+
+    export_wav_var = tk.BooleanVar(value=True)
+    save_params_var = tk.BooleanVar(value=True)
+    vibrato_var = tk.BooleanVar(value=False)
+    fadeout_var = tk.BooleanVar(value=True)
+    ralph_loop_var = tk.BooleanVar(value=False)
 
     pt_label(left, "SPEED").grid(row=7, column=0, sticky="w", padx=8)
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
@@ -4623,40 +4958,10 @@ def run_gui():
 
     pt_label(left, "TEMPO").grid(row=8, column=0, sticky="w", padx=8)
     tempo_var = tk.StringVar(value=str(DEFAULT_TEMPO))
-    tempo_entry = tk.Entry(left, textvariable=tempo_var, width=6, font=base_font, bg="#9b9b9b", fg="#000000", relief="sunken")
-    tempo_entry.grid(row=8, column=1, sticky="e", padx=8, pady=2)
-    tips.bind(tempo_entry, "TEMPO")
-
-    slowdown_var = tk.BooleanVar(value=False)
-    slowdown_cb = ttk.Checkbutton(left, text=tr("Enable slowdown to the end of the song"), variable=slowdown_var, style="PT.TCheckbutton")
-    _bind_i18n(slowdown_cb, "Enable slowdown to the end of the song")
-    slowdown_cb.grid(row=10, column=0, columnspan=2, sticky="w", padx=8, pady=(6, 10))
-    tips.bind(slowdown_cb, "Enable slowdown to the end of the song")
-
-    # These two exports are useful defaults in practice.
-    export_wav_var = tk.BooleanVar(value=True)
-    export_wav_cb = ttk.Checkbutton(left, text=tr("Export rendered songs as WAV"), variable=export_wav_var, style="PT.TCheckbutton")
-    _bind_i18n(export_wav_cb, "Export rendered songs as WAV")
-    export_wav_cb.grid(row=11, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
-    tips.bind(export_wav_cb, "Export rendered songs as WAV")
-
-    save_params_var = tk.BooleanVar(value=True)
-    save_params_cb = ttk.Checkbutton(left, text=tr("Save song parameters"), variable=save_params_var, style="PT.TCheckbutton")
-    _bind_i18n(save_params_cb, "Save song parameters")
-    save_params_cb.grid(row=12, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 2))
-    tips.bind(save_params_cb, "Save song parameters")
-    vibrato_var = tk.BooleanVar(value=False)
-    vibrato_cb = ttk.Checkbutton(left, text=tr("Disable vibrato in samples"), variable=vibrato_var, style="PT.TCheckbutton")
-    _bind_i18n(vibrato_cb, "Disable vibrato in samples")
-    vibrato_cb.grid(row=13, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 10))
-    tips.bind(vibrato_cb, "Disable vibrato in samples")
-
-
-    pt_label(left, "INSTRUMENTS (CH1..CH4)").grid(row=14, column=0, sticky="w", padx=8)
     # small hint label
     try:
         oct_hint = pt_label(left, "OCTAVE SPAN")
-        oct_hint.grid(row=14, column=0, sticky="w", padx=160)
+        oct_hint.grid(row=11, column=0, sticky="w", padx=160)
         tips.bind(oct_hint, "OCTAVE SPAN")
         _bind_i18n(oct_hint, "OCTAVE SPAN")
     except Exception:
@@ -4688,11 +4993,11 @@ def run_gui():
 
     rnd_inst_btn = ttk.Button(left, text=tr("RND"), style="PT.TButton", command=_randomize_instruments)
     _bind_i18n(rnd_inst_btn, "RND")
-    rnd_inst_btn.grid(row=14, column=1, sticky="e", padx=8)
+    rnd_inst_btn.grid(row=11, column=1, sticky="e", padx=8)
     tips.bind(rnd_inst_btn, "INSTRUMENTS (CH1..CH4)")
 
     inst_vars = [tk.StringVar(value=DEFAULT_INSTRUMENTS[i]) for i in range(4)]
-    oct_vars = [tk.StringVar(value="3") for _ in range(4)]  # 1..3
+    oct_vars = [tk.StringVar(value="3"), tk.StringVar(value="3"), tk.StringVar(value="2"), tk.StringVar(value="3")]  # CH3 default = 2
 
     def add_inst_row(r: int, label: str, var: tk.StringVar, octv: tk.StringVar):
         pt_label(left, label).grid(row=r, column=0, sticky="w", padx=8, pady=2)
@@ -4705,15 +5010,15 @@ def run_gui():
         tips.bind(cb, "INSTRUMENTS (CH1..CH4)")
         tips.bind(oc, "OCTAVE SPAN")
 
-    add_inst_row(15, "CH1", inst_vars[0], oct_vars[0])
-    add_inst_row(16, "CH2", inst_vars[1], oct_vars[1])
-    add_inst_row(17, "CH3", inst_vars[2], oct_vars[2])
-    add_inst_row(18, "CH4", inst_vars[3], oct_vars[3])
+    add_inst_row(12, "CH1", inst_vars[0], oct_vars[0])
+    add_inst_row(13, "CH2", inst_vars[1], oct_vars[1])
+    add_inst_row(14, "CH3", inst_vars[2], oct_vars[2])
+    add_inst_row(15, "CH4", inst_vars[3], oct_vars[3])
 
     # Language selector (affects labels + tooltips)
-    pt_label(left, "LANGUAGE").grid(row=19, column=0, sticky="w", padx=8, pady=(10, 2))
+    pt_label(left, "LANGUAGE").grid(row=16, column=0, sticky="w", padx=8, pady=(10, 2))
     lang_combo = ttk.Combobox(left, textvariable=lang_var, values=LANG_CHOICES, width=14, style="PT.TCombobox", state="readonly")
-    lang_combo.grid(row=19, column=1, sticky="e", padx=8, pady=(10, 2))
+    lang_combo.grid(row=16, column=1, sticky="e", padx=8, pady=(10, 2))
     tips.bind(lang_combo, "LANGUAGE")
 
     def _on_lang_change(_evt=None):
@@ -4742,21 +5047,25 @@ def run_gui():
 
     # buttons
     btn_frame = tk.Frame(left, bg="#8f8f8f")
-    btn_frame.grid(row=20, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
+    btn_frame.grid(row=17, column=0, columnspan=2, sticky="we", padx=8, pady=(0, 10))
 
     gen_btn = ttk.Button(btn_frame, text=tr("GENERATE"), style="PT.TButton")
+    regen_btn = ttk.Button(btn_frame, text=tr("RE-GENERATE"), style="PT.TButton")
     play_btn = ttk.Button(btn_frame, text=tr("PLAY"), style="PT.TButton")
     stop_btn = ttk.Button(btn_frame, text=tr("STOP"), style="PT.TButton")
     _bind_i18n(gen_btn, "GENERATE")
+    _bind_i18n(regen_btn, "RE-GENERATE")
     _bind_i18n(play_btn, "PLAY")
     _bind_i18n(stop_btn, "STOP")
     tips.bind(gen_btn, "GENERATE")
+    tips.bind(regen_btn, "RE-GENERATE")
     tips.bind(play_btn, "PLAY")
     tips.bind(stop_btn, "STOP")
 
     gen_btn.grid(row=0, column=0, sticky="we", padx=(0, 6))
-    play_btn.grid(row=0, column=1, sticky="we", padx=(0, 6))
-    stop_btn.grid(row=0, column=2, sticky="we")
+    regen_btn.grid(row=0, column=1, sticky="we", padx=(0, 6))
+    play_btn.grid(row=0, column=2, sticky="we", padx=(0, 6))
+    stop_btn.grid(row=0, column=3, sticky="we")
 
     open_out_btn = ttk.Button(btn_frame, text=tr("OPEN OUTPUT"), style="PT.TButton", command=_open_output_folder)
     open_plg_btn = ttk.Button(btn_frame, text=tr("OPEN PLUGINS"), style="PT.TButton", command=_open_plugin_folder)
@@ -4770,29 +5079,39 @@ def run_gui():
 
     open_out_btn.grid(row=1, column=0, sticky="we", padx=(0, 6), pady=(6, 0))
     open_plg_btn.grid(row=1, column=1, sticky="we", padx=(0, 6), pady=(6, 0))
-    refresh_plg_btn.grid(row=1, column=2, sticky="we", pady=(6, 0))
+    refresh_plg_btn.grid(row=1, column=2, columnspan=2, sticky="we", pady=(6, 0))
 
     add_plg_btn = ttk.Button(btn_frame, text=tr("ADD AS PLUGIN"), style="PT.TButton", command=_add_last_as_plugin)
     _bind_i18n(add_plg_btn, "ADD AS PLUGIN")
     tips.bind(add_plg_btn, "ADD AS PLUGIN")
-    add_plg_btn.grid(row=2, column=0, columnspan=3, sticky="we", pady=(6, 0))
+    add_plg_btn.grid(row=2, column=0, columnspan=4, sticky="we", pady=(6, 0))
 
-    # initial states
+    # initial states - tk.Button uses config, ttk uses configure
     _dummy = None
     try:
-        play_btn.state(["disabled"])
-        stop_btn.state(["disabled"])
-        add_plg_btn.state(["disabled"])
+        play_btn.config(state="disabled")
+        regen_btn.configure(state="disabled")
+        stop_btn.configure(state="disabled")
+        add_plg_btn.configure(state="disabled")
     except Exception:
         pass
 
     btn_frame.columnconfigure(0, weight=1)
     btn_frame.columnconfigure(1, weight=1)
     btn_frame.columnconfigure(2, weight=1)
+    btn_frame.columnconfigure(3, weight=1)
 
-    # --- right: visualizer panel (click to toggle Spectrum / Scopes) ---
-    title_bar = tk.Frame(right, bg="#8f8f8f")
-    title_bar.pack(fill="x", padx=10, pady=(10, 2))
+    # --- Notebook with Main (Visualizer+Logs), Samples, and Options ---
+    right_notebook = ttk.Notebook(right, style="PT.TNotebook")
+    right_notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+    # Tab 1: MAIN - Visualizer + Render Status + Pattern Preview + Logs
+    main_tab = tk.Frame(right_notebook, bg="#8f8f8f")
+    right_notebook.add(main_tab, text=tr("MAIN"))
+
+    # Visualizer section
+    title_bar = tk.Frame(main_tab, bg="#8f8f8f")
+    title_bar.pack(fill="x", pady=(10, 2))
 
     viz_title_var = tk.StringVar(value=tr("SPECTRUM ANALYZER"))
     viz_title_lbl = tk.Label(title_bar, textvariable=viz_title_var, bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
@@ -4801,17 +5120,17 @@ def run_gui():
     hint_lbl = tk.Label(title_bar, text=tr("Click visualizer to toggle Spectrum / Scopes"), bg="#8f8f8f", fg="#2a2a2a", font=("Courier New", 12, "bold"))
     hint_lbl.pack(anchor="w")
 
-    canvas = tk.Canvas(right)
-    canvas.pack(fill="x", padx=10, pady=(0, 10))
+    canvas = tk.Canvas(main_tab)
+    canvas.pack(fill="x", pady=(0, 10))
     tips.bind(canvas, "Click visualizer to toggle Spectrum / Scopes")
 
-    viz_mode = "spectrum"  # spectrum | scope
+    viz_mode = "spectrum"  # spectrum | scope | lightorgan
     viz_view = None
 
     def set_viz_mode(mode: str):
         nonlocal viz_mode, viz_view
         mode = (mode or "").strip().lower()
-        if mode not in ("spectrum", "scope"):
+        if mode not in ("spectrum", "scope", "lightorgan"):
             mode = "spectrum"
         viz_mode = mode
         try:
@@ -4821,30 +5140,36 @@ def run_gui():
         if viz_mode == "spectrum":
             viz_title_var.set(tr("SPECTRUM ANALYZER"))
             viz_view = SpectrumAnalyzer(canvas, bars=32, width=560, height=160, segments=22)
-        else:
+        elif viz_mode == "scope":
             viz_title_var.set(tr("STEREO SCOPES"))
             viz_view = OscilloscopeView(canvas, width=560, height=160)
+        else:  # lightorgan
+            viz_title_var.set(tr("LIGHT ORGAN"))
+            viz_view = LightOrganView(canvas, width=560, height=160)
         try:
             viz_view.reset()
         except Exception:
             pass
 
     def _toggle_viz(_evt=None):
-        set_viz_mode("scope" if viz_mode == "spectrum" else "spectrum")
+        # Cycle through: spectrum -> scope -> lightorgan -> spectrum
+        modes = ["spectrum", "scope", "lightorgan"]
+        current_idx = modes.index(viz_mode) if viz_mode in modes else 0
+        next_mode = modes[(current_idx + 1) % len(modes)]
+        set_viz_mode(next_mode)
 
     canvas.bind("<Button-1>", _toggle_viz)
     set_viz_mode("spectrum")
 
-    info_bar = tk.Frame(right, bg="#8f8f8f")
-    info_bar.pack(fill="both", expand=True, padx=10, pady=(0, 10))
-    info_bar.columnconfigure(0, weight=1)
-    info_bar.rowconfigure(1, weight=2)
-    info_bar.rowconfigure(3, weight=3)
+    # Render status and Harmony display
+    status_frame = tk.Frame(main_tab, bg="#8f8f8f")
+    status_frame.pack(fill="x", pady=(0, 6))
+    status_frame.columnconfigure(0, weight=1)
+    status_frame.columnconfigure(1, weight=1)
 
-    # Render / playback status belongs next to the log output (right side).
     render_var = tk.StringVar(value="")
     progress_lbl = tk.Label(
-        info_bar,
+        status_frame,
         textvariable=render_var,
         bg="#8f8f8f",
         fg="#1a1a1a",
@@ -4852,14 +5177,29 @@ def run_gui():
         anchor="w",
         justify="left",
     )
-    progress_lbl.grid(row=0, column=0, sticky="we", pady=(0, 6))
+    progress_lbl.grid(row=0, column=0, sticky="w", pady=(0, 6))
 
-    info_txt = tk.Text(info_bar, height=7, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
-    info_txt.grid(row=1, column=0, sticky="nsew")
+    harmony_var = tk.StringVar(value="Harmony: --%")
+    harmony_lbl = tk.Label(
+        status_frame,
+        textvariable=harmony_var,
+        bg="#8f8f8f",
+        fg="#2a6a2a",
+        font=("Courier New", 10, "bold"),
+        anchor="e",
+    )
+    harmony_lbl.grid(row=0, column=1, sticky="e", pady=(0, 6))
+    tips.bind(harmony_lbl, "HARMONY")
+
+    # Log output
+    info_txt = tk.Text(main_tab, height=8, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
+    info_txt.pack(fill="x", padx=5, pady=5)
     info_txt.insert("end", tr("Generate a song, then hit PLAY.") + "\n")
-    # --- pattern preview (scrollable tracker grid) ---
-    patt_header = tk.Frame(info_bar, bg="#8f8f8f")
-    patt_header.grid(row=2, column=0, sticky="we", pady=(10, 2))
+    info_txt.config(state="disabled")
+
+    # Pattern preview header
+    patt_header = tk.Frame(main_tab, bg="#8f8f8f")
+    patt_header.pack(fill="x", pady=(10, 2))
     patt_title = tk.Label(patt_header, text=tr("PATTERN PREVIEW"), bg="#8f8f8f", fg="#1a1a1a", font=("Courier New", 11, "bold"))
     patt_title.pack(side="left")
 
@@ -4868,8 +5208,9 @@ def run_gui():
     patt_combo.pack(side="left", padx=(12, 0))
     tips.bind(patt_combo, "PATTERN PREVIEW")
 
-    patt_frame = tk.Frame(info_bar, bg="#8f8f8f")
-    patt_frame.grid(row=3, column=0, sticky="nsew")
+    # Pattern preview frame
+    patt_frame = tk.Frame(main_tab, bg="#8f8f8f")
+    patt_frame.pack(fill="both", expand=True, padx=5, pady=5)
     patt_frame.columnconfigure(0, weight=1)
     patt_frame.rowconfigure(0, weight=1)
 
@@ -4880,45 +5221,6 @@ def run_gui():
     patt_x = tk.Scrollbar(patt_frame, orient="horizontal", command=patt_txt.xview)
     patt_x.grid(row=1, column=0, sticky="we")
     patt_txt.configure(yscrollcommand=patt_y.set, xscrollcommand=patt_x.set)
-
-    def _pattern_grid_text(song: SongData, p_idx: int) -> str:
-        p_idx = max(0, min(int(p_idx), len(song.patterns) - 1))
-        pat = song.patterns[p_idx]
-        lines = []
-        lines.append(f"PATTERN {p_idx}")
-        lines.append("row | CH1            | CH2            | CH3            | CH4")
-        lines.append("----+----------------+----------------+----------------+----------------")
-        for r in range(64):
-            c0 = _cell_to_text(pat[r][0])
-            c1 = _cell_to_text(pat[r][1])
-            c2 = _cell_to_text(pat[r][2])
-            c3 = _cell_to_text(pat[r][3])
-            lines.append(f"{r:02d}  | {c0:<14} | {c1:<14} | {c2:<14} | {c3:<14}")
-        return "\n".join(lines) + "\n"
-
-    def update_pattern_preview(_evt=None):
-        try:
-            patt_txt.config(state="normal")
-            patt_txt.delete("1.0", "end")
-            if last_song is None:
-                patt_txt.insert("end", "(no song yet)\n")
-            else:
-                try:
-                    idx = int(patt_sel_var.get().strip())
-                except Exception:
-                    idx = 0
-                patt_txt.insert("end", _pattern_grid_text(last_song, idx))
-            patt_txt.config(state="disabled")
-        except Exception:
-            pass
-
-    patt_combo.bind("<<ComboboxSelected>>", update_pattern_preview)
-    update_pattern_preview()
-
-    info_txt.config(state="disabled")
-
-    # analyzer update loop
-    after_id = None
 
     def log(msg: str):
         info_txt.config(state="normal")
@@ -4931,6 +5233,425 @@ def run_gui():
             (not closing) and root.after(0, lambda: log(msg))
         except Exception:
             pass
+
+
+
+    def post_status(msg: str, *, only_if_empty: bool = False):
+        """Thread-safe status setter for the main status label."""
+        def _apply():
+            try:
+                if only_if_empty:
+                    cur = ""
+                    try:
+                        cur = str(render_var.get())
+                    except Exception:
+                        cur = ""
+                    if cur.strip() != "":
+                        return
+                render_var.set(msg)
+            except Exception:
+                pass
+        try:
+            (not closing) and root.after(0, _apply)
+        except Exception:
+            pass
+
+    def post_status_clear_if(expected: str):
+        """Clear status only if it still matches expected."""
+        def _apply():
+            try:
+                cur = ""
+                try:
+                    cur = str(render_var.get())
+                except Exception:
+                    cur = ""
+                if cur == expected:
+                    render_var.set("")
+            except Exception:
+                pass
+        try:
+            (not closing) and root.after(0, _apply)
+        except Exception:
+            pass
+
+    def _compute_ralph_score(song: SongData) -> tuple[float, float, float]:
+        """
+        Compute a Ralph-Loop score (0..100) focused on Harmony+Melody across the whole song.
+        Returns: (score, harmony_score, melody_score)
+        """
+        fallback = float(getattr(song, "harmony_score", 0.0) or 0.0)
+        if not HARMONY_AVAILABLE:
+            return fallback, fallback, fallback
+        try:
+            drum_ch = set()
+            try:
+                drum_ch = set(int(k) for k in getattr(song, "drum_channel_styles", {}).keys())
+            except Exception:
+                drum_ch = set()
+
+            pats = song.patterns
+            if drum_ch:
+                pats2 = []
+                for pat in pats:
+                    npat = []
+                    for row in pat:
+                        nrow = []
+                        for ch, cell in enumerate(row):
+                            if ch in drum_ch:
+                                nrow.append((None, 0, 0, 0))
+                            else:
+                                nrow.append(cell)
+                        npat.append(nrow)
+                    pats2.append(npat)
+            else:
+                pats2 = pats
+
+            scale_mode_clean = str(getattr(song, "scale_mode", "major") or "major").strip().lower()
+            if scale_mode_clean in ("auto", "random", ""):
+                scale_mode_clean = "major"
+            key_root = str(getattr(song, "key_root", "C-2") or "C-2")
+
+            qc = MusicQualityChecker(quality_threshold=0.0)
+            q = qc.check_quality_third_pass(pats2, scale_mode_clean, key_root)
+
+            harmony = float(getattr(q, "harmony_score", q.overall_score))
+            melody = float(getattr(q, "melody_score", q.overall_score))
+            tonal = float(getattr(q, "structure_score", q.overall_score))
+
+            score = 0.45 * harmony + 0.45 * melody + 0.10 * tonal
+            score = max(0.0, min(100.0, score))
+            return score, harmony, melody
+        except Exception:
+            return fallback, fallback, fallback
+
+    # Tab 2: Samples Manager
+    samples_tab = tk.Frame(right_notebook, bg="#8f8f8f")
+    right_notebook.add(samples_tab, text=tr("SAMPLES"))
+
+    # Sample Manager UI
+    pt_label(samples_tab, "Sample Manager").pack(anchor="w", pady=(10, 5))
+
+    # Sample list frame
+    sample_list_frame = tk.Frame(samples_tab, bg="#8f8f8f", bd=2, relief="ridge")
+    sample_list_frame.pack(fill="x", padx=5, pady=5)
+
+    # Headers
+    header_frame = tk.Frame(sample_list_frame, bg="#7f7f7f")
+    header_frame.pack(fill="x")
+    tk.Label(header_frame, text=tr("Sample"), bg="#7f7f7f", fg="#000000", font=("Courier New", 9, "bold"), width=12).pack(side="left", padx=5)
+    tk.Label(header_frame, text=tr("Instrument"), bg="#7f7f7f", fg="#000000", font=("Courier New", 9, "bold"), width=15).pack(side="left", padx=5)
+    tk.Label(header_frame, text="Status", bg="#7f7f7f", fg="#000000", font=("Courier New", 9, "bold"), width=12).pack(side="left", padx=5)
+    tk.Label(header_frame, text=tr("Volume"), bg="#7f7f7f", fg="#000000", font=("Courier New", 9, "bold"), width=8).pack(side="left", padx=5)
+
+    # Sample rows (4 channels)
+    sample_vars = []
+    sample_status_vars = []
+    sample_volume_vars = []
+    sample_custom_paths = [None, None, None, None]  # Store custom WAV paths
+
+    for ch in range(4):
+        row = tk.Frame(sample_list_frame, bg="#8f8f8f")
+        row.pack(fill="x", pady=2)
+
+        # Channel label
+        tk.Label(row, text=f"CH{ch+1}", bg="#8f8f8f", fg="#000000", font=("Courier New", 9, "bold"), width=12).pack(side="left", padx=5)
+
+        # Instrument label (updates when generated)
+        inst_lbl = tk.Label(row, text="--", bg="#9b9b9b", fg="#000000", font=("Courier New", 9), width=15, relief="sunken")
+        inst_lbl.pack(side="left", padx=5)
+
+        # Status (Generated/Custom)
+        status_var = tk.StringVar(value=tr("Generated"))
+        sample_status_vars.append(status_var)
+        status_lbl = tk.Label(row, textvariable=status_var, bg="#8f8f8f", fg="#2a6a2a", font=("Courier New", 9), width=12)
+        status_lbl.pack(side="left", padx=5)
+
+        # Volume slider
+        vol_var = tk.DoubleVar(value=1.0)
+        sample_volume_vars.append(vol_var)
+        vol_scale = tk.Scale(row, from_=0.0, to=2.0, resolution=0.1, orient="horizontal",
+                            variable=vol_var, length=80, bg="#8f8f8f", highlightthickness=0)
+        vol_scale.pack(side="left", padx=5)
+
+        # Action buttons
+        def _make_play_btn(channel):
+            return lambda: _play_sample(channel)
+        def _make_import_btn(channel):
+            return lambda: _import_sample(channel)
+        def _make_reset_btn(channel):
+            return lambda: _reset_sample(channel)
+
+        sample_play_btn = ttk.Button(row, text=tr("Play Sample"), style="PT.TButton", command=_make_play_btn(ch), width=8)
+        sample_play_btn.pack(side="left", padx=2)
+        tips.bind(sample_play_btn, "Play Sample")
+
+        import_btn = ttk.Button(row, text=tr("Replace Sample"), style="PT.TButton", command=_make_import_btn(ch), width=10)
+        import_btn.pack(side="left", padx=2)
+        tips.bind(import_btn, "Replace Sample")
+
+        reset_btn = ttk.Button(row, text=tr("Reset Sample"), style="PT.TButton", command=_make_reset_btn(ch), width=8)
+        reset_btn.pack(side="left", padx=2)
+        tips.bind(reset_btn, "Reset Sample")
+
+        sample_vars.append({
+            'inst_lbl': inst_lbl,
+            'status_var': status_var,
+            'vol_var': vol_var,
+            'row': row
+        })
+
+    # Global import button
+    import_all_btn = ttk.Button(samples_tab, text=tr("Import WAV"), style="PT.TButton",
+                                 command=lambda: _import_all_samples())
+    import_all_btn.pack(anchor="w", padx=5, pady=(10, 5))
+    tips.bind(import_all_btn, "Import WAV")
+
+    # Sample info text
+    sample_info = tk.Text(samples_tab, height=8, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
+    sample_info.pack(fill="both", expand=True, padx=5, pady=5)
+    sample_info.insert("end", tr("Sample Manager") + "\n")
+    sample_info.insert("end", "- " + tr("Generated") + ": " + tt("Generated") + "\n")
+    sample_info.insert("end", "- " + tr("Custom") + ": " + tt("Custom") + "\n")
+    sample_info.insert("end", "\n" + tr("Import WAV") + ": " + tt("Import WAV") + "\n")
+    sample_info.config(state="disabled")
+
+    # Tab 3: Options - Checkbox controls moved here
+    options_tab = tk.Frame(right_notebook, bg="#8f8f8f")
+    right_notebook.add(options_tab, text=tr("OPTIONS"))
+
+    pt_label(options_tab, "OPTIONS").pack(anchor="w", pady=(10, 5), padx=10)
+
+    # Export options frame
+    export_frame = tk.Frame(options_tab, bg="#8f8f8f", bd=2, relief="ridge")
+    export_frame.pack(fill="x", padx=10, pady=5)
+
+    export_wav_cb = ttk.Checkbutton(export_frame, text=tr("Export rendered songs as WAV"), variable=export_wav_var, style="PT.TCheckbutton")
+    _bind_i18n(export_wav_cb, "Export rendered songs as WAV")
+    export_wav_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(export_wav_cb, "Export rendered songs as WAV")
+
+    save_params_cb = ttk.Checkbutton(export_frame, text=tr("Save song parameters"), variable=save_params_var, style="PT.TCheckbutton")
+    _bind_i18n(save_params_cb, "Save song parameters")
+    save_params_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(save_params_cb, "Save song parameters")
+
+    vibrato_cb = ttk.Checkbutton(export_frame, text=tr("Disable vibrato in samples"), variable=vibrato_var, style="PT.TCheckbutton")
+    _bind_i18n(vibrato_cb, "Disable vibrato in samples")
+    vibrato_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(vibrato_cb, "Disable vibrato in samples")
+
+    # Fadeout checkbox moved to OPTIONS tab
+    fadeout_cb = ttk.Checkbutton(export_frame, text=tr("Add empty fade-out pattern"), variable=fadeout_var, style="PT.TCheckbutton")
+    _bind_i18n(fadeout_cb, "Add empty fade-out pattern")
+    fadeout_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(fadeout_cb, "Adds empty pattern at end for instruments to fade out naturally")
+
+    # Slowdown checkbox moved to OPTIONS tab
+    slowdown_cb = ttk.Checkbutton(export_frame, text=tr("Enable slowdown to the end of the song"), variable=slowdown_var, style="PT.TCheckbutton")
+    _bind_i18n(slowdown_cb, "Enable slowdown to the end of the song")
+    slowdown_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(slowdown_cb, "Enable slowdown to the end of the song")
+
+    ralph_loop_cb = ttk.Checkbutton(export_frame, text=tr("Ralph-Loop"), variable=ralph_loop_var, style="PT.TCheckbutton")
+    _bind_i18n(ralph_loop_cb, "Ralph-Loop")
+    ralph_loop_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(ralph_loop_cb, "Ralph-Loop")
+
+    # Info text for options
+    options_info = tk.Text(options_tab, height=10, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
+    options_info.pack(fill="both", expand=True, padx=10, pady=10)
+    options_info.insert("end", "Export Options\n")
+    options_info.insert("end", "- Export WAV: Automatically save rendered audio\n")
+    options_info.insert("end", "- Save Params: Save song parameters to text file\n")
+    options_info.insert("end", "- Disable Vibrato: Turn off vibrato in generated samples\n")
+    options_info.insert("end", "- Fade-out: Add empty pattern for natural instrument decay\n")
+    options_info.insert("end", "- Slowdown: Enable ending slowdown effect\n")
+    options_info.insert("end", "- Ralph-Loop: Regenerate until quality >= 90% (Harmony+Melody)\n")
+    options_info.config(state="disabled")
+
+    # Initial sample display - show default instruments
+    try:
+        for ch, inst in enumerate(DEFAULT_INSTRUMENTS):
+            if ch < len(sample_vars):
+                sample_vars[ch]['inst_lbl'].configure(text=inst)
+    except Exception:
+        pass
+
+
+    def _sample_bytes_to_preview_wav(sb: bytes, sr_in: int = 8287, sr_out: int = 44100, seconds: float = 1.25, gain: float = 1.0) -> bytes | None:
+        """Convert MOD 8-bit signed sample bytes to a short mono WAV preview (PCM16)."""
+        try:
+            flt = bytes_to_float_sample(sb)
+            if not flt:
+                return None
+
+            n_in = max(1, len(flt))
+            n_out = max(1, int(float(seconds) * float(sr_out)))
+            ratio = float(sr_in) / float(sr_out)
+
+            out = array("h")
+            fade_len = max(1, int(0.10 * sr_out))
+            for i in range(n_out):
+                x = (i * ratio) % n_in
+                i0 = int(x)
+                i1 = (i0 + 1) % n_in
+                frac = x - i0
+                v = flt[i0] * (1.0 - frac) + flt[i1] * frac
+
+                if i >= n_out - fade_len:
+                    tail = (n_out - i) / float(fade_len)
+                    v *= max(0.0, min(1.0, tail))
+
+                v *= float(gain)
+                out.append(int(max(-32767, min(32767, v * 32767.0))))
+
+            return pcm16_to_wav_bytes(out.tobytes(), sr_out, nch=1)
+        except Exception:
+            return None
+
+    def _resolve_generated_sample_bytes(channel: int) -> tuple[bytes | None, str]:
+        """Return (sample_bytes, label) for a channel, even before any song was generated."""
+        try:
+            if last_song is not None and hasattr(last_song, "samples_bytes"):
+                try:
+                    if int(channel) in getattr(last_song, "drum_channel_styles", {}):
+                        style = getattr(last_song, "drum_channel_styles", {}).get(int(channel), "techno")
+                        rng_d = random.Random(int(getattr(last_song, "seed", 0)) ^ 0xD00DCAFE ^ int(channel))
+                        return make_drum_sample(style, "Kick", rng_d), f"{style} Kick"
+                except Exception:
+                    pass
+
+                if 0 <= int(channel) < len(last_song.samples_bytes):
+                    sb = last_song.samples_bytes[int(channel)]
+                    label = ""
+                    try:
+                        label = str(getattr(last_song, "instrument_kinds", [""] * 4)[int(channel)])
+                    except Exception:
+                        label = ""
+                    return sb, (label or f"CH{channel+1}")
+        except Exception:
+            pass
+
+        try:
+            kind = inst_vars[int(channel)].get() if int(channel) < len(inst_vars) else ""
+        except Exception:
+            kind = ""
+
+        if is_drumset_kind(kind):
+            style = drumset_style_from_kind(kind) or "techno"
+            rng_d = random.Random(int(time.time() * 1000) ^ (os.getpid() << 8) ^ int(channel))
+            return make_drum_sample(style, "Kick", rng_d), f"{style} Kick"
+
+        try:
+            disable_vib = bool(vibrato_var.get())
+        except Exception:
+            disable_vib = False
+
+        try:
+            kinds_now = [v.get() for v in inst_vars]
+            ens = sum(1 for k in kinds_now if not is_drumset_kind(k))
+            ens = max(1, int(ens))
+        except Exception:
+            ens = 4
+
+        rng_s = random.Random(int(time.time() * 1000) ^ (os.getpid() << 9) ^ (int(channel) << 4))
+        try:
+            sb = make_instrument_sample(str(kind), rng_s, f0=REF_F0, disable_vibrato=disable_vib, ensemble_size=ens)
+            return sb, str(kind)
+        except Exception:
+            return None, str(kind)
+
+    def _play_sample(channel: int):
+        """Play the sample for the specified channel (works even before generating a song)."""
+        try:
+            if sample_custom_paths[channel] is not None:
+                path = sample_custom_paths[channel]
+                if Path(path).exists():
+                    log(f"Playing CH{channel+1} custom sample: {Path(path).name}")
+                    wav_data = Path(path).read_bytes()
+                    player.play(wav_data)
+                    log(f"Custom sample playback started for CH{channel+1}")
+                    return
+                log(f"Custom sample file not found: {path}")
+                return
+
+            sb, label = _resolve_generated_sample_bytes(channel)
+            if not sb:
+                log(f"CH{channel+1}: No sample available.")
+                return
+
+            try:
+                vol = int(sample_volume_vars[channel].get()) if channel < len(sample_volume_vars) else 48
+            except Exception:
+                vol = 48
+            gain = max(0.05, min(2.0, float(vol) / 48.0))
+
+            wavb = _sample_bytes_to_preview_wav(sb, sr_in=8287, sr_out=44100, seconds=1.25, gain=gain)
+            if wavb is None:
+                log(f"CH{channel+1} ({label}): Preview render failed.")
+                return
+
+            log(f"Playing CH{channel+1}: {label}")
+            player.play(wavb)
+        except Exception as e:
+            log(f"Play sample error: {e}")
+
+    def _import_sample(channel: int):
+        """Import a custom WAV file for the specified channel."""
+        try:
+            from tkinter import filedialog
+            path = filedialog.askopenfilename(
+                title=f"Import WAV for CH{channel+1}",
+                filetypes=[("WAV files", "*.wav"), ("All files", "*.*")]
+            )
+            if path:
+                sample_custom_paths[channel] = path
+                sample_status_vars[channel].set(tr("Custom"))
+                log(f"CH{channel+1}: Imported custom sample: {Path(path).name}")
+        except Exception as e:
+            log(f"Import error: {e}")
+
+    def _reset_sample(channel: int):
+        """Reset to generated sample."""
+        try:
+            sample_custom_paths[channel] = None
+            sample_status_vars[channel].set(tr("Generated"))
+            log(f"CH{channel+1}: Reset to generated sample")
+        except Exception as e:
+            log(f"Reset error: {e}")
+
+    def _import_all_samples():
+        """Import multiple samples at once."""
+        try:
+            from tkinter import filedialog
+            paths = filedialog.askopenfilenames(
+                title="Import WAV files",
+                filetypes=[("WAV files", "*.wav"), ("All files", "*.*")]
+            )
+            if paths:
+                for i, path in enumerate(paths[:4]):  # Max 4 samples
+                    if i < 4:
+                        sample_custom_paths[i] = path
+                        sample_status_vars[i].set(tr("Custom"))
+                log(f"Imported {len(paths[:4])} sample(s)")
+        except Exception as e:
+            log(f"Import error: {e}")
+
+    def _update_sample_display():
+        """Update sample display when a new song is generated."""
+        try:
+            if last_song is not None and hasattr(last_song, 'instrument_kinds'):
+                for ch, inst_kind in enumerate(last_song.instrument_kinds[:4]):
+                    if ch < len(sample_vars):
+                        sample_vars[ch]['inst_lbl'].configure(text=inst_kind)
+                        # Reset custom status on new generation
+                        if sample_custom_paths[ch] is None:
+                            sample_status_vars[ch].set(tr("Generated"))
+        except Exception:
+            pass
+
+    # analyzer update loop
+    after_id = None
 
     wav_state_lock = threading.Lock()
     wav_exporting = False
@@ -4970,6 +5691,13 @@ def run_gui():
                 return
             wav_exporting = True
 
+        # If the UI status line is currently empty, show a lightweight heartbeat while exporting.
+        try:
+            post_status("thinking...", only_if_empty=True)
+        except Exception:
+            pass
+
+
         def _worker(wav_bytes: bytes, out_path: Path):
             nonlocal wav_exporting
             try:
@@ -4978,6 +5706,11 @@ def run_gui():
             finally:
                 with wav_state_lock:
                     wav_exporting = False
+
+                try:
+                    post_status_clear_if("thinking...")
+                except Exception:
+                    pass
 
         threading.Thread(target=_worker, args=(wavb, wav_path), daemon=True).start()
 
@@ -5003,7 +5736,13 @@ def run_gui():
                             viz_view.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
                         except Exception:
                             pass
-                else:
+                elif viz_mode == "scope":
+                    if preview_pcm and viz_view is not None:
+                        try:
+                            viz_view.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
+                        except Exception:
+                            pass
+                else:  # lightorgan
                     if preview_pcm and viz_view is not None:
                         try:
                             viz_view.update_from_pcm(preview_pcm, preview_sr, idx, window=1024)
@@ -5058,6 +5797,17 @@ def run_gui():
                 except Exception:
                     pass
             
+
+            # Show something while the generator is busy (some phases are CPU-heavy).
+            try:
+                render_var.set("thinking...")
+                try:
+                    root.update_idletasks()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
             order_list = parse_order_string(order_var.get())
             validate_order(order_list, n_patterns=PATTERN_COUNT)
 
@@ -5116,33 +5866,129 @@ def run_gui():
             mutes = [mv.get() for mv in mute_vars]
             stereo_width = max(0.0, min(2.0, float(width_var.get()) / 100.0))
 
+
+            try:
+                ralph_enabled = bool(ralph_loop_var.get())
+            except Exception:
+                ralph_enabled = False
+            ralph_target = 90.0
+            ralph_max_attempts = 50
+
+            def _cleanup_attempt(p: Path):
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+                for ext in (".txt", ".wav"):
+                    try:
+                        q = p.with_suffix(ext)
+                        if q.exists():
+                            q.unlink()
+                    except Exception:
+                        pass
+
             for i in range(batch_n):
-                seed_i = int(seed_base) + i
-                path, song = generate_song(
-                    order=order_list,
-                    seed=seed_i,
-                    enable_slowdown=slowdown_var.get(),
-                    speed=spd,
-                    tempo=bpm,
-                    instruments=instruments,
-                    melody_name=melody_var.get(),
-                    derive_mode=derive_var.get(),
-                    disable_vibrato=vibrato_var.get(),
-                    key_root_override=key_var.get(),
-                    scale_mode=scale_mode,
-                    variation=variation,
-                    mute_channels=mutes,
-                    stereo_width=stereo_width,
-                    octave_spans=spans_used,
-                    mod_signature=modsig_var.get() if 'modsig_var' in locals() else DEFAULT_MOD_SIGNATURE,
-                    compat_mode=compat_var.get() if 'compat_var' in locals() else True,
-                )
-                last_path = path
-                last_song_local = song
-                log(f"Generated: {path}")
+                base_seed_i = int(seed_base) + i
+
+                best_path: Path | None = None
+                best_song: SongData | None = None
+                best_score = -1.0
+                best_seed = base_seed_i
+
+                max_tries = ralph_max_attempts if ralph_enabled else 1
+
+                for attempt in range(max_tries):
+                    seed_try = int(base_seed_i) + attempt * 9973
+
+                    # Keep the user informed during potentially long Ralph-Loop / generation phases.
+                    try:
+                        if ralph_enabled:
+                            pct_show = int(max(0.0, min(100.0, (best_score if best_score >= 0 else 0.0))))
+                            render_var.set(f"ralph is retrying (give him a chance) {pct_show:3d}%")
+                        else:
+                            render_var.set("thinking...")
+                        try:
+                            root.update_idletasks()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+
+                    path, song = generate_song(
+                        order=order_list,
+                        seed=seed_try,
+                        enable_slowdown=slowdown_var.get(),
+                        speed=spd,
+                        tempo=bpm,
+                        instruments=instruments,
+                        melody_name=melody_var.get(),
+                        derive_mode=derive_var.get(),
+                        disable_vibrato=vibrato_var.get(),
+                        key_root_override=key_var.get(),
+                        scale_mode=scale_mode,
+                        variation=variation,
+                        mute_channels=mutes,
+                        stereo_width=stereo_width,
+                        octave_spans=spans_used,
+                        mod_signature=modsig_var.get() if 'modsig_var' in locals() else DEFAULT_MOD_SIGNATURE,
+                        compat_mode=compat_var.get() if 'compat_var' in locals() else True,
+                        fadeout_pattern=fadeout_var.get(),
+                        quality_passes=passes_var.get(),
+                    )
+
+                    rscore, hs, ms = _compute_ralph_score(song)
+                    try:
+                        song.harmony_score = float(rscore)
+                    except Exception:
+                        pass
+
+                    if ralph_enabled:
+                        log(f"Ralph-Loop attempt {attempt+1}/{max_tries}: {rscore:.1f}% (H={hs:.1f} / M={ms:.1f}) | seed={seed_try}")
+
+                    if best_song is None or rscore > best_score:
+                        try:
+                            if best_path is not None and best_path != path:
+                                _cleanup_attempt(best_path)
+                        except Exception:
+                            pass
+                        best_path, best_song, best_score, best_seed = path, song, float(rscore), int(seed_try)
+                    else:
+                        _cleanup_attempt(path)
+
+                    # Update status with the best achieved quality so far.
+                    try:
+                        if ralph_enabled:
+                            pct_show = int(max(0.0, min(100.0, best_score)))
+                            render_var.set(f"ralph is retrying (give him a chance) {pct_show:3d}%")
+                        else:
+                            # keep a heartbeat while generating
+                            if str(render_var.get() or "").strip() == "":
+                                render_var.set("thinking...")
+                        try:
+                            root.update_idletasks()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+
+                    if (not ralph_enabled) or (best_score >= ralph_target):
+                        break
+
+                if ralph_enabled and best_score < ralph_target:
+                    log(f"Ralph-Loop: target {ralph_target:.0f}% not reached. Keeping best {best_score:.1f}% (seed={best_seed}).")
+
+                if best_song is None or best_path is None:
+                    raise RuntimeError("Generation failed")
+
+                last_path = best_path
+                last_song_local = best_song
+                log(f"Generated: {last_path}")
                 if batch_n > 1:
                     try:
-                        log(f"  batch {i+1}/{batch_n} | seed={seed_i}")
+                        log(f"  batch {i+1}/{batch_n} | seed={best_seed}")
                     except Exception:
                         pass
 
@@ -5161,6 +6007,18 @@ def run_gui():
             if song is None or path is None:
                 raise RuntimeError("Generation failed")
 
+            # Update harmony probability display
+            try:
+                if hasattr(song, 'harmony_score') and song.harmony_score is not None:
+                    harmony_pct = int(song.harmony_score)
+                    harmony_var.set(f"Harmony: {harmony_pct}%")
+                    log(f"Harmonic quality: {harmony_pct}%")
+                else:
+                    harmony_var.set("Harmony: N/A")
+            except Exception as e:
+                harmony_var.set("Harmony: --%")
+                log(f"Harmony display error: {e}")
+
             derive_txt = getattr(song, "derive_mode", "")
             vib_txt = "OFF" if getattr(song, "vibrato_disabled", False) else "ON"
             log(f"Melody: {song.base_melody}")
@@ -5171,6 +6029,11 @@ def run_gui():
             log(f"Instruments: {', '.join(song.instrument_kinds)}")
             try:
                 log(f"Mute: {''.join(['1' if x else '0' for x in getattr(song, 'mute_channels', [False, False, False, False])])} | Stereo: {getattr(song,'stereo_width',1.0):.2f}")
+            except Exception:
+                pass
+
+            try:
+                _update_sample_display()
             except Exception:
                 pass
 
@@ -5187,10 +6050,17 @@ def run_gui():
             except Exception:
                 pass
             try:
-                play_btn.state(["!disabled"])
-                stop_btn.state(["disabled"])
+                _set_btn_states(can_generate=True, can_play=True, can_stop=False)
             except Exception:
                 pass
+
+            # Clear transient status once generation is complete.
+            try:
+                if str(render_var.get() or "").strip().lower().startswith("ralph is retrying") or str(render_var.get() or "").strip() == "thinking...":
+                    render_var.set("")
+            except Exception:
+                pass
+
         except BaseException as e:
             try:
                 messagebox.showerror("Error", str(e))
@@ -5209,11 +6079,15 @@ def run_gui():
     # render_var is defined in the right-side log panel (next to the visualizer).
 
     def _set_btn_states(*, can_generate: bool, can_play: bool, can_stop: bool):
-        gen_btn.state(["!disabled"] if can_generate else ["disabled"])
-        play_btn.state(["!disabled"] if can_play else ["disabled"])
-        stop_btn.state(["!disabled"] if can_stop else ["disabled"])
         try:
-            add_plg_btn.state(["!disabled"] if (last_song is not None) else ["disabled"])
+            gen_btn.configure(state="normal" if can_generate else "disabled")
+            regen_btn.configure(state="normal" if (can_generate and last_song is not None) else "disabled")
+            play_btn.config(state="normal" if can_play else "disabled")
+            stop_btn.configure(state="normal" if can_stop else "disabled")
+            try:
+                add_plg_btn.configure(state="normal" if (last_song is not None) else "disabled")
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -5509,7 +6383,32 @@ def run_gui():
             except Exception:
                 pass
 
+    def on_regenerate():
+        """Regenerate the same song keeping the current pattern order."""
+        nonlocal last_song, last_mod_path
+        if last_song is None:
+            try:
+                messagebox.showerror("Error", "No song generated yet. Generate a song first.")
+            except Exception:
+                pass
+            return
+
+        # Stop playback if playing
+        if play_state == "playing":
+            try:
+                player.stop()
+            except Exception:
+                pass
+
+        # Keep the current pattern order - do NOT modify order_var
+        # Just regenerate with current settings for variation in patterns
+        log(f"Re-generating with current pattern order: {order_var.get()}")
+
+        # Now call on_generate to create the new version
+        on_generate()
+
     gen_btn.config(command=on_generate)
+    regen_btn.config(command=on_regenerate)
     play_btn.config(command=on_play)
     stop_btn.config(command=on_stop)
 
