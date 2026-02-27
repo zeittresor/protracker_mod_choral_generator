@@ -7,6 +7,17 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit x (27.02.2026 v2.0.3):</b></i>
+
+- Tabs added Song / Samples / Options
+- Samples tab let you preview each generated sample, or you could replace it with your own samples
+- Ralph-Loop added in options (to let the script as hard as it can to find a most harmonic song for a single seed)
+- Empty Pattern Option added to the end of each song to make sure its not just stopping if you dont want to loop it
+- Added another visulizer like a classical disco light
+- Added many more minor options
+
+<img width="1408" height="893" alt="grafik" src="https://github.com/user-attachments/assets/9b6178ae-fca8-444f-9aec-81c2bef09b9d" />
+
 <i><b>New in Commit ee77f2e (23.02.2026 v1.8.1):</b></i>
 
 - Some work on the harmonize engine
