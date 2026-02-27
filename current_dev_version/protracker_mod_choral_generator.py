@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ProTracker MOD Choral Generator (v2.0)
+# ProTracker MOD Choral Generator (v2.1)
 # Source: https://github.com/zeittresor/protracker_mod_choral_generator
 
 from __future__ import annotations
@@ -4217,7 +4217,7 @@ def run_gui():
             pass
 
     root.report_callback_exception = _tk_exception_handler
-    root.title("ProTracker MOD Choral Generator (v2.0)")
+    root.title("ProTracker MOD Choral Generator (v2.1)")
     root.configure(bg="#8f8f8f")
     # Keep a stable window size (prevents width jitter from varying filename lengths)
     # but avoid cutting off the bottom on some Windows setups by starting taller.
@@ -4251,11 +4251,11 @@ def run_gui():
 
     base_font = ("Courier New", 10, "bold")
 
-    style.configure("PT.TButton", font=base_font, padding=(8, 3))
+    style.configure("PT.TButton", font=base_font, padding=(8, 3), background="#9b9b9b", foreground="#000000")
     # Map disabled state to ensure visual feedback
     style.map("PT.TButton",
-              foreground=[('disabled', '#666666'), ('active', '#000000')],
-              background=[('disabled', '#999999'), ('active', '#b0b0b0')])
+              foreground=[('disabled', '#666666'), ('active', '#000000'), ('!disabled', '#000000')],
+              background=[('disabled', '#999999'), ('active', '#b0b0b0'), ('!disabled', '#9b9b9b')])
     style.configure("PT.TLabel", font=base_font, background="#8f8f8f", foreground="#1a1a1a")
     style.configure("PT.TFrame", background="#8f8f8f")
     style.configure("PT.TCheckbutton", font=base_font, background="#8f8f8f")
@@ -4315,6 +4315,7 @@ def run_gui():
             "Save song parameters": "Save song parameters",
             "Disable vibrato in samples": "Disable vibrato in samples",
             "Add empty fade-out pattern": "Add empty fade-out pattern",
+            "Ralph-Loop": "RALPH-LOOP",
             "PASSES": "PASSES",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
             
@@ -4425,6 +4426,7 @@ def run_gui():
             "Save song parameters": "Sauver les paramètres",
             "Disable vibrato in samples": "Désactiver le vibrato",
             "Add empty fade-out pattern": "Ajouter un pattern de fade-out vide",
+            "Ralph-Loop": "BOUCLE RALPH",
             "PASSES": "PASSES",
             "INSTRUMENTS (CH1..CH4)": "INSTRUMENTS (CH1..CH4)",
             
@@ -4483,6 +4485,7 @@ def run_gui():
             "Save song parameters": "Save song parameters as .txt next to the .mod.",
             "Disable vibrato in samples": "Disable vibrato in synthesized instruments (more stable pitch).",
             "Add empty fade-out pattern": "Adds an empty pattern at the end so instruments can fade out naturally instead of stopping abruptly.",
+            "Ralph-Loop": "Ralph-Loop: keep regenerating until Harmony+Melody score reaches 90% (keeps best attempt if the target is not reached).",
             "PASSES": "Number of quality check passes (more passes = better harmony).",
             "OCTAVE SPAN": "Per channel: how many octaves (around the base key octave) notes may use. 1=only base octave, 3=base±1.",
             "CH1": "Channel 1 instrument and octave span.",
@@ -4530,6 +4533,7 @@ def run_gui():
             "Save song parameters": "Song-Parameter als .txt neben der .mod speichern.",
             "Disable vibrato in samples": "Vibrato in Synth-Instrumenten deaktivieren (stabilere Tonhöhe).",
             "Add empty fade-out pattern": "Fügt einen leeren Pattern am Ende hinzu, damit Instrumente natürlich ausklingen können.",
+            "Ralph-Loop": "Ralph-Loop: Generiert so lange neu, bis Harmonie+Melodie mindestens 90% erreichen (oder behält den besten Versuch, falls das Ziel nicht erreicht wird).",
             "PASSES": "Anzahl der Qualitätsprüf-Durchläufe (mehr = bessere Harmonie).",
             "OCTAVE SPAN": "Pro Kanal: über wie viele Oktaven (um die Basis-Oktave) Noten verteilt sein dürfen. 1=nur Basis-Oktave, 3=Basis±1.",
             "CH1": "Kanal 1 Instrument und Oktav-Spanne.",
@@ -4578,6 +4582,7 @@ def run_gui():
             "Save song parameters": "Enregistrer les paramètres en .txt à côté du .mod.",
             "Disable vibrato in samples": "Désactiver le vibrato (hauteur plus stable).",
             "Add empty fade-out pattern": "Ajoute un pattern vide à la fin pour laisser les instruments s'éteindre naturellement.",
+            "Ralph-Loop": "Boucle Ralph : régénère jusqu'à obtenir Harmonie+Mélodie ≥ 90% (ou garde la meilleure tentative si le seuil n'est pas atteint).",
             "PASSES": "Nombre de passes de vérification qualité (plus = meilleure harmonie).",
             "OCTAVE SPAN": "Par canal : nombre d’octaves autorisées (autour de l’octave de base). 1=octave de base, 3=base±1.",
             "CH1": "Canal 1 instrument et étendue d'octaves.",
@@ -4943,6 +4948,7 @@ def run_gui():
     save_params_var = tk.BooleanVar(value=True)
     vibrato_var = tk.BooleanVar(value=False)
     fadeout_var = tk.BooleanVar(value=True)
+    ralph_loop_var = tk.BooleanVar(value=False)
 
     pt_label(left, "SPEED").grid(row=7, column=0, sticky="w", padx=8)
     speed_var = tk.StringVar(value=str(DEFAULT_SPEED))
@@ -5045,10 +5051,7 @@ def run_gui():
 
     gen_btn = ttk.Button(btn_frame, text=tr("GENERATE"), style="PT.TButton")
     regen_btn = ttk.Button(btn_frame, text=tr("RE-GENERATE"), style="PT.TButton")
-    # Use tk.Button instead of ttk.Button for play_btn to avoid style issues
-    play_btn = tk.Button(btn_frame, text=tr("PLAY"), font=base_font, bg="#9b9b9b", fg="#000000",
-                         activebackground="#b0b0b0", activeforeground="#000000",
-                         relief="raised", bd=2, state="disabled", disabledforeground="#666666")
+    play_btn = ttk.Button(btn_frame, text=tr("PLAY"), style="PT.TButton")
     stop_btn = ttk.Button(btn_frame, text=tr("STOP"), style="PT.TButton")
     _bind_i18n(gen_btn, "GENERATE")
     _bind_i18n(regen_btn, "RE-GENERATE")
@@ -5231,6 +5234,96 @@ def run_gui():
         except Exception:
             pass
 
+
+
+    def post_status(msg: str, *, only_if_empty: bool = False):
+        """Thread-safe status setter for the main status label."""
+        def _apply():
+            try:
+                if only_if_empty:
+                    cur = ""
+                    try:
+                        cur = str(render_var.get())
+                    except Exception:
+                        cur = ""
+                    if cur.strip() != "":
+                        return
+                render_var.set(msg)
+            except Exception:
+                pass
+        try:
+            (not closing) and root.after(0, _apply)
+        except Exception:
+            pass
+
+    def post_status_clear_if(expected: str):
+        """Clear status only if it still matches expected."""
+        def _apply():
+            try:
+                cur = ""
+                try:
+                    cur = str(render_var.get())
+                except Exception:
+                    cur = ""
+                if cur == expected:
+                    render_var.set("")
+            except Exception:
+                pass
+        try:
+            (not closing) and root.after(0, _apply)
+        except Exception:
+            pass
+
+    def _compute_ralph_score(song: SongData) -> tuple[float, float, float]:
+        """
+        Compute a Ralph-Loop score (0..100) focused on Harmony+Melody across the whole song.
+        Returns: (score, harmony_score, melody_score)
+        """
+        fallback = float(getattr(song, "harmony_score", 0.0) or 0.0)
+        if not HARMONY_AVAILABLE:
+            return fallback, fallback, fallback
+        try:
+            drum_ch = set()
+            try:
+                drum_ch = set(int(k) for k in getattr(song, "drum_channel_styles", {}).keys())
+            except Exception:
+                drum_ch = set()
+
+            pats = song.patterns
+            if drum_ch:
+                pats2 = []
+                for pat in pats:
+                    npat = []
+                    for row in pat:
+                        nrow = []
+                        for ch, cell in enumerate(row):
+                            if ch in drum_ch:
+                                nrow.append((None, 0, 0, 0))
+                            else:
+                                nrow.append(cell)
+                        npat.append(nrow)
+                    pats2.append(npat)
+            else:
+                pats2 = pats
+
+            scale_mode_clean = str(getattr(song, "scale_mode", "major") or "major").strip().lower()
+            if scale_mode_clean in ("auto", "random", ""):
+                scale_mode_clean = "major"
+            key_root = str(getattr(song, "key_root", "C-2") or "C-2")
+
+            qc = MusicQualityChecker(quality_threshold=0.0)
+            q = qc.check_quality_third_pass(pats2, scale_mode_clean, key_root)
+
+            harmony = float(getattr(q, "harmony_score", q.overall_score))
+            melody = float(getattr(q, "melody_score", q.overall_score))
+            tonal = float(getattr(q, "structure_score", q.overall_score))
+
+            score = 0.45 * harmony + 0.45 * melody + 0.10 * tonal
+            score = max(0.0, min(100.0, score))
+            return score, harmony, melody
+        except Exception:
+            return fallback, fallback, fallback
+
     # Tab 2: Samples Manager
     samples_tab = tk.Frame(right_notebook, bg="#8f8f8f")
     right_notebook.add(samples_tab, text=tr("SAMPLES"))
@@ -5359,6 +5452,11 @@ def run_gui():
     slowdown_cb.pack(anchor="w", padx=5, pady=2)
     tips.bind(slowdown_cb, "Enable slowdown to the end of the song")
 
+    ralph_loop_cb = ttk.Checkbutton(export_frame, text=tr("Ralph-Loop"), variable=ralph_loop_var, style="PT.TCheckbutton")
+    _bind_i18n(ralph_loop_cb, "Ralph-Loop")
+    ralph_loop_cb.pack(anchor="w", padx=5, pady=2)
+    tips.bind(ralph_loop_cb, "Ralph-Loop")
+
     # Info text for options
     options_info = tk.Text(options_tab, height=10, font=("Courier New", 9), bg="#9b9b9b", fg="#000000", relief="sunken", bd=2)
     options_info.pack(fill="both", expand=True, padx=10, pady=10)
@@ -5368,6 +5466,7 @@ def run_gui():
     options_info.insert("end", "- Disable Vibrato: Turn off vibrato in generated samples\n")
     options_info.insert("end", "- Fade-out: Add empty pattern for natural instrument decay\n")
     options_info.insert("end", "- Slowdown: Enable ending slowdown effect\n")
+    options_info.insert("end", "- Ralph-Loop: Regenerate until quality >= 90% (Harmony+Melody)\n")
     options_info.config(state="disabled")
 
     # Initial sample display - show default instruments
@@ -5378,38 +5477,122 @@ def run_gui():
     except Exception:
         pass
 
-    def _play_sample(channel: int):
-        """Play the sample for the specified channel."""
+
+    def _sample_bytes_to_preview_wav(sb: bytes, sr_in: int = 8287, sr_out: int = 44100, seconds: float = 1.25, gain: float = 1.0) -> bytes | None:
+        """Convert MOD 8-bit signed sample bytes to a short mono WAV preview (PCM16)."""
         try:
-            # Check for custom sample first
+            flt = bytes_to_float_sample(sb)
+            if not flt:
+                return None
+
+            n_in = max(1, len(flt))
+            n_out = max(1, int(float(seconds) * float(sr_out)))
+            ratio = float(sr_in) / float(sr_out)
+
+            out = array("h")
+            fade_len = max(1, int(0.10 * sr_out))
+            for i in range(n_out):
+                x = (i * ratio) % n_in
+                i0 = int(x)
+                i1 = (i0 + 1) % n_in
+                frac = x - i0
+                v = flt[i0] * (1.0 - frac) + flt[i1] * frac
+
+                if i >= n_out - fade_len:
+                    tail = (n_out - i) / float(fade_len)
+                    v *= max(0.0, min(1.0, tail))
+
+                v *= float(gain)
+                out.append(int(max(-32767, min(32767, v * 32767.0))))
+
+            return pcm16_to_wav_bytes(out.tobytes(), sr_out, nch=1)
+        except Exception:
+            return None
+
+    def _resolve_generated_sample_bytes(channel: int) -> tuple[bytes | None, str]:
+        """Return (sample_bytes, label) for a channel, even before any song was generated."""
+        try:
+            if last_song is not None and hasattr(last_song, "samples_bytes"):
+                try:
+                    if int(channel) in getattr(last_song, "drum_channel_styles", {}):
+                        style = getattr(last_song, "drum_channel_styles", {}).get(int(channel), "techno")
+                        rng_d = random.Random(int(getattr(last_song, "seed", 0)) ^ 0xD00DCAFE ^ int(channel))
+                        return make_drum_sample(style, "Kick", rng_d), f"{style} Kick"
+                except Exception:
+                    pass
+
+                if 0 <= int(channel) < len(last_song.samples_bytes):
+                    sb = last_song.samples_bytes[int(channel)]
+                    label = ""
+                    try:
+                        label = str(getattr(last_song, "instrument_kinds", [""] * 4)[int(channel)])
+                    except Exception:
+                        label = ""
+                    return sb, (label or f"CH{channel+1}")
+        except Exception:
+            pass
+
+        try:
+            kind = inst_vars[int(channel)].get() if int(channel) < len(inst_vars) else ""
+        except Exception:
+            kind = ""
+
+        if is_drumset_kind(kind):
+            style = drumset_style_from_kind(kind) or "techno"
+            rng_d = random.Random(int(time.time() * 1000) ^ (os.getpid() << 8) ^ int(channel))
+            return make_drum_sample(style, "Kick", rng_d), f"{style} Kick"
+
+        try:
+            disable_vib = bool(vibrato_var.get())
+        except Exception:
+            disable_vib = False
+
+        try:
+            kinds_now = [v.get() for v in inst_vars]
+            ens = sum(1 for k in kinds_now if not is_drumset_kind(k))
+            ens = max(1, int(ens))
+        except Exception:
+            ens = 4
+
+        rng_s = random.Random(int(time.time() * 1000) ^ (os.getpid() << 9) ^ (int(channel) << 4))
+        try:
+            sb = make_instrument_sample(str(kind), rng_s, f0=REF_F0, disable_vibrato=disable_vib, ensemble_size=ens)
+            return sb, str(kind)
+        except Exception:
+            return None, str(kind)
+
+    def _play_sample(channel: int):
+        """Play the sample for the specified channel (works even before generating a song)."""
+        try:
             if sample_custom_paths[channel] is not None:
                 path = sample_custom_paths[channel]
                 if Path(path).exists():
                     log(f"Playing CH{channel+1} custom sample: {Path(path).name}")
-                    with open(path, 'rb') as f:
-                        wav_data = f.read()
+                    wav_data = Path(path).read_bytes()
                     player.play(wav_data)
                     log(f"Custom sample playback started for CH{channel+1}")
                     return
-                else:
-                    log(f"Custom sample file not found: {path}")
-                    return
-            
-            # Check if we have a generated song
-            if last_song is not None and channel < len(last_song.instrument_kinds):
-                inst_kind = last_song.instrument_kinds[channel]
-                log(f"Playing CH{channel+1}: {inst_kind}")
-                
-                # Play the preview if available
-                if preview_wav is not None:
-                    player.play(preview_wav)
-                    log(f"Sample playback started for CH{channel+1}")
-                else:
-                    log(f"No preview available - generate a song first")
-            else:
-                # No song generated yet
-                inst_name = inst_vars[channel].get() if channel < len(inst_vars) else f"CH{channel+1}"
-                log(f"CH{channel+1} ({inst_name}): Generate a song first to hear the sample")
+                log(f"Custom sample file not found: {path}")
+                return
+
+            sb, label = _resolve_generated_sample_bytes(channel)
+            if not sb:
+                log(f"CH{channel+1}: No sample available.")
+                return
+
+            try:
+                vol = int(sample_volume_vars[channel].get()) if channel < len(sample_volume_vars) else 48
+            except Exception:
+                vol = 48
+            gain = max(0.05, min(2.0, float(vol) / 48.0))
+
+            wavb = _sample_bytes_to_preview_wav(sb, sr_in=8287, sr_out=44100, seconds=1.25, gain=gain)
+            if wavb is None:
+                log(f"CH{channel+1} ({label}): Preview render failed.")
+                return
+
+            log(f"Playing CH{channel+1}: {label}")
+            player.play(wavb)
         except Exception as e:
             log(f"Play sample error: {e}")
 
@@ -5508,6 +5691,13 @@ def run_gui():
                 return
             wav_exporting = True
 
+        # If the UI status line is currently empty, show a lightweight heartbeat while exporting.
+        try:
+            post_status("thinking...", only_if_empty=True)
+        except Exception:
+            pass
+
+
         def _worker(wav_bytes: bytes, out_path: Path):
             nonlocal wav_exporting
             try:
@@ -5516,6 +5706,11 @@ def run_gui():
             finally:
                 with wav_state_lock:
                     wav_exporting = False
+
+                try:
+                    post_status_clear_if("thinking...")
+                except Exception:
+                    pass
 
         threading.Thread(target=_worker, args=(wavb, wav_path), daemon=True).start()
 
@@ -5602,6 +5797,17 @@ def run_gui():
                 except Exception:
                     pass
             
+
+            # Show something while the generator is busy (some phases are CPU-heavy).
+            try:
+                render_var.set("thinking...")
+                try:
+                    root.update_idletasks()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+
             order_list = parse_order_string(order_var.get())
             validate_order(order_list, n_patterns=PATTERN_COUNT)
 
@@ -5660,35 +5866,129 @@ def run_gui():
             mutes = [mv.get() for mv in mute_vars]
             stereo_width = max(0.0, min(2.0, float(width_var.get()) / 100.0))
 
+
+            try:
+                ralph_enabled = bool(ralph_loop_var.get())
+            except Exception:
+                ralph_enabled = False
+            ralph_target = 90.0
+            ralph_max_attempts = 50
+
+            def _cleanup_attempt(p: Path):
+                try:
+                    if p.exists():
+                        p.unlink()
+                except Exception:
+                    pass
+                for ext in (".txt", ".wav"):
+                    try:
+                        q = p.with_suffix(ext)
+                        if q.exists():
+                            q.unlink()
+                    except Exception:
+                        pass
+
             for i in range(batch_n):
-                seed_i = int(seed_base) + i
-                path, song = generate_song(
-                    order=order_list,
-                    seed=seed_i,
-                    enable_slowdown=slowdown_var.get(),
-                    speed=spd,
-                    tempo=bpm,
-                    instruments=instruments,
-                    melody_name=melody_var.get(),
-                    derive_mode=derive_var.get(),
-                    disable_vibrato=vibrato_var.get(),
-                    key_root_override=key_var.get(),
-                    scale_mode=scale_mode,
-                    variation=variation,
-                    mute_channels=mutes,
-                    stereo_width=stereo_width,
-                    octave_spans=spans_used,
-                    mod_signature=modsig_var.get() if 'modsig_var' in locals() else DEFAULT_MOD_SIGNATURE,
-                    compat_mode=compat_var.get() if 'compat_var' in locals() else True,
-                    fadeout_pattern=fadeout_var.get(),
-                    quality_passes=passes_var.get(),
-                )
-                last_path = path
-                last_song_local = song
-                log(f"Generated: {path}")
+                base_seed_i = int(seed_base) + i
+
+                best_path: Path | None = None
+                best_song: SongData | None = None
+                best_score = -1.0
+                best_seed = base_seed_i
+
+                max_tries = ralph_max_attempts if ralph_enabled else 1
+
+                for attempt in range(max_tries):
+                    seed_try = int(base_seed_i) + attempt * 9973
+
+                    # Keep the user informed during potentially long Ralph-Loop / generation phases.
+                    try:
+                        if ralph_enabled:
+                            pct_show = int(max(0.0, min(100.0, (best_score if best_score >= 0 else 0.0))))
+                            render_var.set(f"ralph is retrying (give him a chance) {pct_show:3d}%")
+                        else:
+                            render_var.set("thinking...")
+                        try:
+                            root.update_idletasks()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+
+                    path, song = generate_song(
+                        order=order_list,
+                        seed=seed_try,
+                        enable_slowdown=slowdown_var.get(),
+                        speed=spd,
+                        tempo=bpm,
+                        instruments=instruments,
+                        melody_name=melody_var.get(),
+                        derive_mode=derive_var.get(),
+                        disable_vibrato=vibrato_var.get(),
+                        key_root_override=key_var.get(),
+                        scale_mode=scale_mode,
+                        variation=variation,
+                        mute_channels=mutes,
+                        stereo_width=stereo_width,
+                        octave_spans=spans_used,
+                        mod_signature=modsig_var.get() if 'modsig_var' in locals() else DEFAULT_MOD_SIGNATURE,
+                        compat_mode=compat_var.get() if 'compat_var' in locals() else True,
+                        fadeout_pattern=fadeout_var.get(),
+                        quality_passes=passes_var.get(),
+                    )
+
+                    rscore, hs, ms = _compute_ralph_score(song)
+                    try:
+                        song.harmony_score = float(rscore)
+                    except Exception:
+                        pass
+
+                    if ralph_enabled:
+                        log(f"Ralph-Loop attempt {attempt+1}/{max_tries}: {rscore:.1f}% (H={hs:.1f} / M={ms:.1f}) | seed={seed_try}")
+
+                    if best_song is None or rscore > best_score:
+                        try:
+                            if best_path is not None and best_path != path:
+                                _cleanup_attempt(best_path)
+                        except Exception:
+                            pass
+                        best_path, best_song, best_score, best_seed = path, song, float(rscore), int(seed_try)
+                    else:
+                        _cleanup_attempt(path)
+
+                    # Update status with the best achieved quality so far.
+                    try:
+                        if ralph_enabled:
+                            pct_show = int(max(0.0, min(100.0, best_score)))
+                            render_var.set(f"ralph is retrying (give him a chance) {pct_show:3d}%")
+                        else:
+                            # keep a heartbeat while generating
+                            if str(render_var.get() or "").strip() == "":
+                                render_var.set("thinking...")
+                        try:
+                            root.update_idletasks()
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+
+                    if (not ralph_enabled) or (best_score >= ralph_target):
+                        break
+
+                if ralph_enabled and best_score < ralph_target:
+                    log(f"Ralph-Loop: target {ralph_target:.0f}% not reached. Keeping best {best_score:.1f}% (seed={best_seed}).")
+
+                if best_song is None or best_path is None:
+                    raise RuntimeError("Generation failed")
+
+                last_path = best_path
+                last_song_local = best_song
+                log(f"Generated: {last_path}")
                 if batch_n > 1:
                     try:
-                        log(f"  batch {i+1}/{batch_n} | seed={seed_i}")
+                        log(f"  batch {i+1}/{batch_n} | seed={best_seed}")
                     except Exception:
                         pass
 
@@ -5753,6 +6053,14 @@ def run_gui():
                 _set_btn_states(can_generate=True, can_play=True, can_stop=False)
             except Exception:
                 pass
+
+            # Clear transient status once generation is complete.
+            try:
+                if str(render_var.get() or "").strip().lower().startswith("ralph is retrying") or str(render_var.get() or "").strip() == "thinking...":
+                    render_var.set("")
+            except Exception:
+                pass
+
         except BaseException as e:
             try:
                 messagebox.showerror("Error", str(e))
