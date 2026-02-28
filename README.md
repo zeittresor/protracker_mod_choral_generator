@@ -13,6 +13,8 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Added additional visual themes
 - Minor bug fixes
 
+  Note: The classic Version 2.0 is still included (if you dont like "ralph"). To run it just open protracker_mod_choral_generator.py instead of run_linux.sh for Linux or run_windows.bat for Windows.
+
 <img width="1122" height="973" alt="ecs" src="https://github.com/user-attachments/assets/4bfab02d-912b-45bb-92c4-abc2f063bcc5" />
 
 https://github.com/user-attachments/assets/472683b3-76d0-4c45-864a-83e43c7a80c9
