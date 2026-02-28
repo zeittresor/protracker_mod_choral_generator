@@ -1,6 +1,6 @@
-@DATABASE "Protracker Music Generator - Manuals v6.7"
+@DATABASE "Protracker Music Generator - Manuals v6.8"
 @WORDWRAP
-@NODE MAIN "Protracker Music Generator - Manuals v6.7"
+@NODE MAIN "Protracker Music Generator - Manuals v6.8"
 
 @{b}Choose language / Sprache wählen / Choisir la langue@{ub}
 
@@ -13,9 +13,11 @@
 Öffne die Datei: docs/ProtrackerMusicGenerator_DE.guide
 @ENDNODE
 @NODE EN "English"
+@{"Open manual" LINK "ProtrackerMusicGenerator_EN.guide/MAIN"}
 Open file: docs/ProtrackerMusicGenerator_EN.guide
 @ENDNODE
 @NODE FR "Français"
+@{"Ouvrir le manuel" LINK "ProtrackerMusicGenerator_FR.guide/MAIN"}
 Ouvrir le fichier : docs/ProtrackerMusicGenerator_FR.guide
 @ENDNODE
 @ENDDATABASE

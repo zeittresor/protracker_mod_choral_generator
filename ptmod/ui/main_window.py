@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import random
+import subprocess
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional, Any
@@ -590,6 +592,14 @@ class MainWindow(QMainWindow):
         gl.addWidget(self.lang_combo)
         layout.addWidget(grp_lang)
 
+        # Help / Manual (AmigaGuide-like viewer)
+        grp_help = QGroupBox(self.i18n.tr("Help"))
+        gh = QHBoxLayout(grp_help)
+        btn_help = QPushButton(self.i18n.tr("Help"))
+        btn_help.clicked.connect(self._open_help_viewer)
+        gh.addWidget(btn_help)
+        layout.addWidget(grp_help)
+
         # FX injection
         grp_fx = QGroupBox(self.i18n.tr("FX Injection"))
         gfx = QGridLayout(grp_fx)
@@ -1028,6 +1038,27 @@ class MainWindow(QMainWindow):
         self._refresh_sample_display()
         self._append_log(f"Imported {min(4,len(paths))} sample(s).")
 
+
+    def _open_help_viewer(self) -> None:
+        """
+        Launch the standalone AmigaGuide-like viewer (separate process),
+        starting at docs/ProtrackerMusicGenerator_Index.guide.
+        """
+        try:
+            root = Path(__file__).resolve().parents[2]
+            viewer = root / "guide_viewer_app.py"
+            index = root / "docs" / "ProtrackerMusicGenerator_Index.guide"
+            if not viewer.exists():
+                self._append_log(f"[help] viewer script missing: {viewer}")
+                return
+            if not index.exists():
+                self._append_log(f"[help] index missing: {index}")
+                return
+            subprocess.Popen([sys.executable, str(viewer), str(index)], cwd=str(root))
+        except Exception as e:
+            self._append_log(f"[help] failed to launch viewer: {e}")
+
+
     # ---------- theme ----------
     def _apply_theme(self):
         name = self.theme_combo.currentText()
@@ -1069,5 +1100,4 @@ class MainWindow(QMainWindow):
         if was and (not playing) and (not gen_running):
             self._set_status("ready")
         self._was_playing = playing
-
 

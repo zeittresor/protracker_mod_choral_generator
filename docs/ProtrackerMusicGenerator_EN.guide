@@ -1,11 +1,11 @@
-@DATABASE "Protracker Music Generator - Manual v6.7"
+@DATABASE "Protracker Music Generator - Manual v6.8"
 @WORDWRAP
-@NODE MAIN "Protracker Music Generator - Manual v6.7"
+@NODE MAIN "Protracker Music Generator - Manual v6.8"
 @{"Home" LINK MAIN} | @{"Contents" LINK TOC} | @{"Quick Start" LINK QUICKSTART} | @{"GUI Overview" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualizer" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Troubleshooting" LINK TROUBLE} | @{"FAQ" LINK FAQ}
 
-@{b}Protracker Music Generator@{ub} – v6.7
+@{b}Protracker Music Generator@{ub} – v6.8
 
-This manual describes every feature of the PyQt6 GUI (v6.7). It explains each tab, each control, and common workflows.
+This manual describes every feature of the PyQt6 GUI (v6.8). It explains each tab, each control, and common workflows.
 
 Note: AmigaGuide files are plain text. On Windows/Linux you can read them in any editor; on an Amiga (or emulator) open them in AmigaGuide/MultiView.
 

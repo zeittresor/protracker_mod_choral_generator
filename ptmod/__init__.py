@@ -1,3 +1,3 @@
 from .config import SongConfig
 
-__version__ = "6.7"
+__version__ = "6.8"
