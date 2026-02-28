@@ -305,18 +305,8 @@ class MainWindow(QMainWindow):
             self.octv.append(oc)
         left_l.addWidget(grp_inst)
 
-        # Language
-        grp_lang = QGroupBox(self.i18n.tr("LANGUAGE"))
-        gl = QHBoxLayout(grp_lang)
-        self.lang_combo = QComboBox()
-        self.lang_combo.addItems(LANG_CHOICES)
-        self.lang_combo.setCurrentText("English")
-        self.lang_combo.currentTextChanged.connect(self._on_lang_change)
-        gl.addWidget(self.lang_combo)
-        left_l.addWidget(grp_lang)
-
         # Keep groupboxes readable: prefer fixed vertical sizing (scroll handles overflow)
-        for _gb in (grp_order, grp_mel, grp_key, grp_st, grp_adv, grp_inst, grp_lang):
+        for _gb in (grp_order, grp_mel, grp_key, grp_st, grp_adv, grp_inst):
             _gb.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             _gb.setMinimumHeight(_gb.sizeHint().height())
 
@@ -511,7 +501,7 @@ class MainWindow(QMainWindow):
 
         self.opt_export_wav.setChecked(True)
         self.opt_save_params.setChecked(True)
-        self.opt_disable_vibrato.setChecked(False)
+        self.opt_disable_vibrato.setChecked(True)
         self.opt_fadeout.setChecked(True)
         self.opt_slowdown.setChecked(False)
 
@@ -568,13 +558,13 @@ class MainWindow(QMainWindow):
         grp_r = QGroupBox(self.i18n.tr("Ralph-Loop"))
         gr = QGridLayout(grp_r)
         self.opt_ralph = QCheckBox(self.i18n.tr("Ralph-Loop"))
-        self.opt_ralph.setChecked(False)
+        self.opt_ralph.setChecked(True)
         gr.addWidget(self.opt_ralph, 0, 0, 1, 2)
         gr.addWidget(QLabel("Target %"), 1, 0)
-        self.opt_r_target = QSpinBox(); self.opt_r_target.setRange(0, 100); self.opt_r_target.setValue(90)
+        self.opt_r_target = QSpinBox(); self.opt_r_target.setRange(0, 100); self.opt_r_target.setValue(85)
         gr.addWidget(self.opt_r_target, 1, 1)
         gr.addWidget(QLabel("Max attempts"), 2, 0)
-        self.opt_r_attempts = QSpinBox(); self.opt_r_attempts.setRange(1, 200); self.opt_r_attempts.setValue(50)
+        self.opt_r_attempts = QSpinBox(); self.opt_r_attempts.setRange(1, 200); self.opt_r_attempts.setValue(60)
         gr.addWidget(self.opt_r_attempts, 2, 1)
         layout.addWidget(grp_r)
 
@@ -589,6 +579,16 @@ class MainWindow(QMainWindow):
         gt.addWidget(self.theme_combo, 1)
         gt.addWidget(btn_apply)
         layout.addWidget(grp_theme)
+
+        # Language
+        grp_lang = QGroupBox(self.i18n.tr("LANGUAGE"))
+        gl = QHBoxLayout(grp_lang)
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(LANG_CHOICES)
+        self.lang_combo.setCurrentText("English")
+        self.lang_combo.currentTextChanged.connect(self._on_lang_change)
+        gl.addWidget(self.lang_combo)
+        layout.addWidget(grp_lang)
 
         # FX injection
         grp_fx = QGroupBox(self.i18n.tr("FX Injection"))
