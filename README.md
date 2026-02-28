@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit x (28.02.2026 v6.6):</b></i>
+<i><b>New in Commit 825e40b (28.02.2026 v6.6):</b></i>
 
 - Major changes have been made like:
 - Interface Switched from using TkInter to PyQt6
