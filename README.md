@@ -7,6 +7,16 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit x (28.02.2026 v6.7):</b></i>
+
+- Some Option tweaks
+- Added additional visual themes
+- Minor bug fixes
+
+<img width="1122" height="973" alt="ecs" src="https://github.com/user-attachments/assets/4bfab02d-912b-45bb-92c4-abc2f063bcc5" />
+
+https://github.com/user-attachments/assets/472683b3-76d0-4c45-864a-83e43c7a80c9
+
 <i><b>New in Commit 825e40b (28.02.2026 v6.6):</b></i>
 
 - Major changes have been made like:
