@@ -13,7 +13,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 - Interface Switched from using TkInter to PyQt6
 - Theme Support
 - Main Program splitted into different engine modules
-- Fx Sessings added
+- Fx Settings added
 - Multiple bases / combinations of classical songs as a seed base for the randomize function
 - bug fixes
 - Setting Ralph Loop as a default :-)
