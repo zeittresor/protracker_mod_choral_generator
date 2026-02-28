@@ -1,0 +1,4 @@
+QWidget { background: #0B0F14; color: #E6F1FF; }
+QPushButton { background: #00D1FF; color: #001018; border-radius: 8px; padding: 7px 12px; }
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit { background: #121A23; border: 1px solid #00D1FF; border-radius: 8px; padding: 6px; }
+QProgressBar::chunk { background: #00D1FF; }
