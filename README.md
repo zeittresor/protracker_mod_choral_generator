@@ -7,6 +7,19 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit x (28.02.2026 v6.6):</b></i>
+
+- Major changes have been made like:
+- Interface Switched from using TkInter to PyQt6
+- Theme Support
+- Main Program splitted into different engine modules
+- Fx Sessings added
+- Multiple bases / combinations of classical songs as a seed base for the randomize function
+- bug fixes
+- Setting Ralph Loop as a default :-)
+
+<img width="1126" height="950" alt="ralph66" src="https://github.com/user-attachments/assets/dc9ee13a-155d-4489-ab5e-6387700af61c" />
+
 <i><b>New in Commit 865d1b3 (27.02.2026 v2.0.3):</b></i>
 
 - Tabs added Song / Samples / Options
