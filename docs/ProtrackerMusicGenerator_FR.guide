@@ -1,0 +1,232 @@
+@DATABASE "Protracker Music Generator - Manuel v6.7"
+@WORDWRAP
+@NODE MAIN "Protracker Music Generator - Manuel v6.7"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+@{b}Protracker Music Generator@{ub} – v6.7
+
+Ce manuel décrit toutes les fonctions de l’interface PyQt6 (v6.7). Il explique chaque onglet, chaque contrôle et les flux de travail courants.
+
+Note : Les fichiers AmigaGuide sont du texte brut. Sous Windows/Linux, lis‑les dans un éditeur ; sur Amiga (ou émulateur), ouvre‑les dans AmigaGuide/MultiView.
+
+Liens rapides :
+- @{"Démarrage rapide" LINK QUICKSTART}
+- @{"Vue d’ensemble" LINK GUI}
+- @{"Options" LINK OPTIONS}
+- @{"Dépannage" LINK TROUBLE}
+@ENDNODE
+@NODE TOC "Sommaire"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+- @{"Démarrage rapide" LINK QUICKSTART}
+- @{"Vue d’ensemble" LINK GUI}
+- @{"Barre latérale (paramètres)" LINK LEFTPANEL}
+- @{"Onglet MAIN (visualiseur, journal, aperçu pattern)" LINK MAINTAB}
+- @{"Onglet SAMPLES (aperçu, remplacer/réinitialiser, import multiple)" LINK SAMPLES}
+- @{"Onglet OPTIONS (export, compatibilité, Ralph, thème, langue, FX)" LINK OPTIONS}
+- @{"Modes du visualiseur" LINK VISUALIZER}
+- @{"Plugins (mélodies)" LINK PLUGINS}
+- @{"Fichiers de sortie" LINK OUTPUT}
+- @{"Dépannage" LINK TROUBLE}
+- @{"FAQ" LINK FAQ}
+@ENDNODE
+@NODE QUICKSTART "Démarrage rapide"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+1) Dans MAIN, choisir un thème (optionnel) ; dans OPTIONS régler export/qualité.
+2) À gauche : Pattern Order (préréglage ou manuel) – activer SMART si besoin.
+3) À gauche : Base Melody = Random (ou choisir une mélodie) ; Derivation = Near/Far pour varier.
+4) À gauche : choisir les instruments par canal (CH1..CH4).
+5) Cliquer sur GENERATE. Après rendu : PLAY.
+
+Astuce : Pour des résultats reproductibles : désactiver NEW SEED EACH GENERATE et saisir un SEED.
+Astuce : Pour un rendu toujours solide : laisser Ralph-Loop activé (par défaut).
+@ENDNODE
+@NODE GUI "Vue d’ensemble"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+L’interface comporte deux zones :
+- À gauche : paramètres de génération (Order, Melody, Key, Speed/Tempo, Advanced, Instruments) + boutons d’action.
+- À droite : onglets MAIN / SAMPLES / OPTIONS.
+
+Le projet génère des MOD 4 canaux (compatibles ProTracker), rend (optionnel) un aperçu WAV et affiche un aperçu texte des patterns.
+
+Suite : @{"Barre latérale" LINK LEFTPANEL} / @{"Onglet MAIN" LINK MAINTAB} / @{"Onglet SAMPLES" LINK SAMPLES} / @{"Onglet OPTIONS" LINK OPTIONS}.
+@ENDNODE
+@NODE LEFTPANEL "Barre latérale"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+@{b}PATTERN ORDER@{ub}
+- Liste : ordre des patterns (ex. 0,1,2,3,4,5). Définit la séquence de lecture.
+- Bouton SMART : génère un ordre « raisonnable » automatiquement.
+- Case SMART : si activée, l’ordre manuel est ignoré.
+
+@{b}BASE MELODY / MELODY DERIVATION@{ub}
+- BASE MELODY : choisir une mélodie, Random, ou Pure Random (aléatoire cohérent au style).
+- Derivation : Random / Near / Far – intensité de la variation.
+
+@{b}BASE KEY (optionnel)@{ub}
+- Vide = tonalité aléatoire par morceau.
+- Exemple : C-2. RND choisit une tonalité.
+
+@{b}SPEED / TEMPO@{ub}
+- SPEED (ticks par ligne) et TEMPO (BPM-ish) comme dans les trackers.
+
+@{b}Advanced@{ub}
+- SCALE MODE : Auto/Major/Minor/Mixed/… (selon backend).
+- VARIATION : taux de mutation (0..100). Plus haut = plus de changement.
+- SEED (optionnel) : génération déterministe ; RND en choisit un.
+- NEW SEED EACH GENERATE : si activé, un nouveau seed est utilisé à chaque génération (et en batch).
+- BATCH : génère plusieurs morceaux à la suite.
+- MUTE CH : couper des canaux (1..4).
+- STEREO % : largeur stéréo/pan (100 = normal).
+- PASSES : passes internes de qualité (plus = plus lent, souvent meilleur).
+
+@{b}INSTRUMENTS (CH1..CH4)@{ub}
+- Choisir l’instrument par canal ; Octave Span règle la tessiture (CH3 souvent basse).
+
+@{b}Boutons d’action@{ub}
+- GENERATE : génère un/des morceau(x) avec les réglages actuels.
+- RE-GENERATE : regénère (gestion du seed selon NEW SEED EACH GENERATE).
+- PLAY : lit l’aperçu WAV rendu (créé automatiquement si Export WAV activé).
+- STOP : stoppe la lecture ; si génération en cours, demande l’annulation.
+- OPEN OUTPUT : ouvre le dossier de sortie (mods_out).
+- OPEN PLUGINS : ouvre le dossier melody_plugins.
+- REFRESH : recharge les mélodies (plugins + built-ins).
+- ADD AS PLUGIN : exporte la dernière mélodie en plugin.
+@ENDNODE
+@NODE MAINTAB "Onglet MAIN"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+L’onglet MAIN contient :
+- Zone visualiseur (Spectrum / Scopes / Light Organ).
+- Ligne d’état (Render/Thinking/Ralph) + score Harmony.
+- Journal (seeds, scores Ralph, compteurs FX, erreurs).
+- Açu des patterns (texte) + sélecteur de pattern.
+
+Changer de mode : cliquer dans la zone du visualiseur.
+@ENDNODE
+@NODE SAMPLES "Samples"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+Dans l’onglet SAMPLES, pour chaque canal (CH1..CH4) :
+- Instrument (libellé, synchronisé avec la sélection à gauche).
+- Statut (Generated / Custom).
+- Volume (informatif).
+- Boutons :
+  - PLAY : lit un court aperçu du sample.
+  - Replace : charge un WAV personnalisé pour ce canal.
+  - Reset : supprime le WAV personnalisé et revient au sample généré.
+
+Import WAV (multi) : sélection de plusieurs WAV. Les 4 premiers sont affectés à CH1..CH4 (ordre de sélection).
+
+Note : Les WAV personnalisés sont pré‑écoutés directement ; l’export MOD reste soumis aux contraintes classiques des samples MOD.
+@ENDNODE
+@NODE OPTIONS "Options"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+@{b}Export@{ub}
+- Export WAV : rend un WAV à côté du MOD et le charge comme aperçu pour PLAY/visualiseur.
+- Save params (.txt) : écrit un fichier texte de paramètres/analyse à côté du MOD.
+- Disable vibrato in samples : désactive le vibrato des instruments synthétiques (son plus propre).
+- Fade-out pattern : ajoute un fondu de fin.
+- Slowdown : mode slowdown (backend).
+
+@{b}Compatibility@{ub}
+- compat_mode : réglages sûrs pour trackers (meilleure compatibilité).
+- MOD Signature : écrit le « magic » à l’offset 1080 (ex. M.K., FLT4, 4CHN).
+
+@{b}Ralph-Loop@{ub}
+- Activé par défaut. Répète la génération jusqu’à atteindre le score cible.
+- Target % : cible pour (Harmony + Melody)/2.
+- Max attempts : essais maximum ; conserve le meilleur.
+
+@{b}Theme@{ub}
+- Liste des thèmes + Apply : applique un thème QSS. Mettre des *.qss personnalisés dans /themes.
+
+@{b}LANGUAGE@{ub}
+- Langue de l’interface (i18n léger).
+
+@{b}FX Injection@{ub}
+Écrit (optionnel) des commandes d’effet dans les slots FX vides (post-traitement), ex. :
+  - Insert initial speed/tempo : Fxx
+  - Vibrato on melody : 4xy
+  - Portamento transitions : 3xx
+  - Arpeggio ornaments : 0xy
+  - Volume motion : Cxx
+  - Note cut : ECx
+  - Retrig : E9x
+Intensity règle la fréquence/l’intensité de l’injection.
+
+Note : Après chaque génération, le journal affiche `[fx] injected ...` avec des compteurs.
+@ENDNODE
+@NODE VISUALIZER "Visualiseur"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+Le visualiseur utilise l’aperçu PCM (WAV) et un playhead pour analyser des fenêtres glissantes.
+Modes (clic dans le widget) :
+- Spectrum Analyzer : 32 barres (répartition log-ish).
+- Stereo Scopes : formes d’onde séparées L/R.
+- Light Organ : 4 lampes (Low/Mid/High/Presence) avec AGC, attack/decay et peak-hold.
+
+Astuce : Si rien ne bouge, vérifier qu’un aperçu WAV existe (Export WAV activé).
+@ENDNODE
+@NODE PLUGINS "Plugins"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+Les plugins de mélodie sont dans `melody_plugins/`.
+Chaque dossier contient généralement :
+- `melody.txt` (export mélodie/paramètres)
+- `info.txt` (description)
+
+OPEN PLUGINS ouvre le dossier.
+REFRESH recharge la liste.
+ADD AS PLUGIN exporte la dernière mélodie dans un nouveau dossier plugin.
+
+Note : Les plugins apparaissent dans BASE MELODY avec les built-ins.
+@ENDNODE
+@NODE OUTPUT "Fichiers de sortie"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+Dossier de sortie par défaut : `mods_out/` (OPEN OUTPUT).
+Par morceau, vous pouvez obtenir :
+- `*.mod` (module tracker)
+- `*.wav` (aperçu, si Export WAV activé)
+- `*.txt` (paramètres/analyse, si Save params activé)
+
+Les noms de fichiers incluent souvent titre/seed/tonalité (selon backend).
+@ENDNODE
+@NODE TROUBLE "Dépannage"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+@{b}L’application ne démarre pas (plugin Qt / xcb)@{ub}
+- Linux : installer les plugins de plateforme Qt6 (xcb).
+
+@{b}PLAY sans son@{ub}
+- Windows : QtMultimedia devrait fonctionner ; vérifier volume et périphérique audio.
+- Linux : installer des plugins GStreamer ou vérifier `paplay`/`aplay`.
+
+@{b}Le visualiseur n’affiche rien@{ub}
+- Le visualiseur a besoin de l’aperçu PCM. Activer Export WAV ou rendre une fois.
+
+@{b}Le morceau sonne « faux » (conflit majeur/mineur)@{ub}
+- Choisir le bon SCALE MODE (Major/Minor).
+- Post-traitement scale-lock conservateur (sauf Mixed).
+
+@{b}Les FX semblent inactifs@{ub}
+- Vérifier la ligne `[fx] injected ...`.
+- Les effets ne sont injectés que dans les slots FX vides (sécurité).
+@ENDNODE
+@NODE FAQ "FAQ"
+@{"Accueil" LINK MAIN} | @{"Sommaire" LINK TOC} | @{"Démarrage rapide" LINK QUICKSTART} | @{"Vue d’ensemble" LINK GUI} | @{"Options" LINK OPTIONS} | @{"Samples" LINK SAMPLES} | @{"Visualiseur" LINK VISUALIZER} | @{"Plugins" LINK PLUGINS} | @{"Dépannage" LINK TROUBLE} | @{"FAQ" LINK FAQ}
+
+Q : Pourquoi OKTA/FLT8/8CHN si la sortie est en 4 canaux ?
+R : Ce sont des tags (magic). Les tags 8ch peuvent perturber certains lecteurs ; ils sont marqués « 8ch tag ».
+
+Q : Que fait exactement Ralph-Loop ?
+R : Il regénère avec des seeds éloignés, évalue Harmony+Melody et conserve le meilleur essai.
+
+Q : Comment obtenir un maximum de variation ?
+R : Monter VARIATION, Derivation=Far, SCALE MODE Auto ou Mixed, Stereo % > 100, et activer NEW SEED EACH GENERATE.
+@ENDNODE
+@ENDDATABASE
