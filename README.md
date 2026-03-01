@@ -11,6 +11,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 - Added Presets
 - Added Option for Ralph Loop option to ignore Drumsets
+- Help System added based upon the Amiga Guide fileformat (incl. viewer for Windows / Linux)
 - Bug fixes
   
 <img width="2560" height="1040" alt="69" src="https://github.com/user-attachments/assets/33512d9d-077e-4cb3-99f6-b6028010cfd4" />
