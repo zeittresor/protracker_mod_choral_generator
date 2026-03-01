@@ -28,7 +28,7 @@ def main():
         _apply(next(iter(themes.values())))
 
     win = MainWindow(themes=themes, apply_theme_cb=_apply)
-    win.show()
+    win.showMaximized()
     sys.exit(app.exec())
 
 if __name__ == "__main__":

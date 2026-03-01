@@ -1176,7 +1176,8 @@ def note_shift_safe(note: str, semitones: int) -> str:
 def pack_cell(note_name: str | None = None, sample: int = 0, effect: int = 0, param: int = 0) -> bytes:
     period = 0 if note_name is None else PERIODS[note_name]
     samp = sample & 0x1F
-    b0 = ((samp & 0x10) << 4) | ((period >> 8) & 0x0F)
+    # NOTE: sample numbers 16..31 store their high bit in byte0 as 0x10 (no shift).
+    b0 = (samp & 0x10) | ((period >> 8) & 0x0F)
     b1 = period & 0xFF
     b2 = ((samp & 0x0F) << 4) | (effect & 0x0F)
     b3 = param & 0xFF
