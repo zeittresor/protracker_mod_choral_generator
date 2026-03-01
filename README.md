@@ -7,6 +7,13 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit 9ebe093 (01.03.2026) v6.10):</b></i>
+
+- Added vertical scrollbars for the app window (for monitors with a lower resolution)
+- App is starting maximized now
+- Added Presets
+- Fixed a bug for tracks with multiple drumsets
+
 <i><b>New in Commit be9f20f (01.03.2026 v6.9):</b></i>
 
 - Added Presets
