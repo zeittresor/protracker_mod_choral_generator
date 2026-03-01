@@ -149,9 +149,15 @@ class MainWindow(QMainWindow):
 
     # ---------- UI ----------
     def _build_ui(self):
-        root = QWidget()
-        self.setCentralWidget(root)
-        outer = QVBoxLayout(root)
+        root_content = QWidget()
+        app_scroll = QScrollArea()
+        app_scroll.setWidgetResizable(True)
+        app_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        app_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        app_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        app_scroll.setWidget(root_content)
+        self.setCentralWidget(app_scroll)
+        outer = QVBoxLayout(root_content)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         outer.addWidget(splitter, 1)
