@@ -7,6 +7,16 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit 825e40b (28.02.2026 v6.9):</b></i>
+
+- Added Presets
+- Added Option for Ralph Loop option to ignore Drumsets
+- Bug fixes
+  
+<img width="2560" height="1040" alt="69" src="https://github.com/user-attachments/assets/33512d9d-077e-4cb3-99f6-b6028010cfd4" />
+
+https://github.com/user-attachments/assets/646c4fe5-f415-4d6b-82bf-0d11f93ca2a9
+
 <i><b>New in Commit 825e40b (28.02.2026 v6.7):</b></i>
 
 - Some Option tweaks
