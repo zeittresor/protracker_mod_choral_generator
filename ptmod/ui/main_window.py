@@ -25,7 +25,7 @@ from ptmod.engines.playback_engine import PlaybackEngine
 from ptmod.engines.sample_engine import SampleEngine, SamplePreviewSpec
 from ptmod.engines.pattern_engine import format_pattern, order_positions_for_pattern
 from ptmod.engines.generator_engine import generate_batch
-from ptmod.engines.plugins_engine import reload_plugins, plugin_root, open_folder, add_last_as_plugin
+from ptmod.engines.plugins_engine import reload_plugins, plugin_root, open_folder, add_last_as_plugin, get_recommended_pattern_order, get_plugin_meta
 from ptmod.ui.i18n import I18N, LANG_CHOICES
 from ptmod.ui.visualizer import VisualizerWidget
 
@@ -116,6 +116,9 @@ class MainWindow(QMainWindow):
     def __init__(self, themes: dict, apply_theme_cb):
         super().__init__()
         self.setWindowTitle(f"Protracker Music Generator - v{__version__}")
+        self._order_user_modified = False
+        self._last_auto_order: str | None = None
+
         self.resize(1120, 820)
 
         self.themes = themes
@@ -179,6 +182,13 @@ class MainWindow(QMainWindow):
         self.order_combo = QComboBox()
         self.order_combo.setEditable(True)
         try:
+            le = self.order_combo.lineEdit()
+            if le is not None:
+                le.textEdited.connect(self._on_order_user_edit)
+        except Exception:
+            pass
+
+        try:
             for p in getattr(backend, 'ORDER_PRESETS', []):
                 self.order_combo.addItem(str(p))
         except Exception:
@@ -195,6 +205,7 @@ class MainWindow(QMainWindow):
         grp_mel = QGroupBox(self.i18n.tr("BASE MELODY"))
         gm = QGridLayout(grp_mel)
         self.melody_combo = QComboBox()
+        self.melody_combo.currentTextChanged.connect(self._on_melody_selected)
         self._reload_melodies(initial=True)
         gm.addWidget(self.melody_combo, 0, 0, 1, 2)
         gm.addWidget(QLabel(self.i18n.tr("MELODY DERIVATION")), 1, 0)
@@ -568,6 +579,10 @@ class MainWindow(QMainWindow):
         gr.addWidget(QLabel("Max attempts"), 2, 0)
         self.opt_r_attempts = QSpinBox(); self.opt_r_attempts.setRange(1, 200); self.opt_r_attempts.setValue(60)
         gr.addWidget(self.opt_r_attempts, 2, 1)
+        self.opt_r_ignore_drums = QCheckBox(self.i18n.tr("Ignore drumset channels"))
+        self.opt_r_ignore_drums.setChecked(True)
+        self.opt_r_ignore_drums.setToolTip(self.i18n.tt("Ignore drumset channels"))
+        gr.addWidget(self.opt_r_ignore_drums, 3, 0, 1, 2)
         layout.addWidget(grp_r)
 
         # Theme
@@ -811,6 +826,7 @@ class MainWindow(QMainWindow):
         cfg.ralph_loop = bool(self.opt_ralph.isChecked())
         cfg.ralph_target_score = float(self.opt_r_target.value())
         cfg.ralph_max_attempts = int(self.opt_r_attempts.value())
+        cfg.ralph_ignore_drumsets = bool(getattr(self, 'opt_r_ignore_drums', None).isChecked()) if hasattr(self, 'opt_r_ignore_drums') else True
 
         cfg.fx_insert_initial_speed_tempo = bool(self.fx_init.isChecked())
         cfg.fx_vibrato_melody = bool(self.fx_vib.isChecked())
@@ -932,7 +948,41 @@ class MainWindow(QMainWindow):
         # STOP should only remain enabled if generation is still running
         self.btn_stop.setEnabled(bool(self.worker and self.worker.isRunning()))
 
-    # ---------- pattern preview ----------
+    
+    def _on_order_user_edit(self, _txt: str):
+        # User typed into the order field -> don't auto-override with presets.
+        self._order_user_modified = True
+
+    def _on_melody_selected(self, name: str):
+        try:
+            if not name or name in ("Random", "Pure Random"):
+                return
+            if bool(self.chk_use_smart.isChecked()):
+                return
+            rec = get_recommended_pattern_order(name)
+            if not rec:
+                return
+            rec = rec.replace(";", ",").strip()
+            cur = (self.order_combo.currentText() or "").strip()
+            default = str(getattr(backend, 'DEFAULT_ORDER_STR', '0,1,2,3,4,5')).strip()
+            # Apply only if user didn't edit, or order is still default/empty, or it matches previous auto order
+            if (not self._order_user_modified) or (not cur) or (cur == default) or (self._last_auto_order and cur == self._last_auto_order):
+                self.order_combo.setCurrentText(rec)
+                self._last_auto_order = rec
+                self._order_user_modified = False
+                try:
+                    meta = get_plugin_meta(name)
+                    mode = meta.get('mode', '')
+                    if mode:
+                        self._append_log(f"[preset] {name}: applied suggested pattern order (mode={mode})")
+                    else:
+                        self._append_log(f"[preset] {name}: applied suggested pattern order")
+                except Exception:
+                    self._append_log(f"[preset] {name}: applied suggested pattern order")
+        except Exception:
+            pass
+
+# ---------- pattern preview ----------
     def _update_pattern_preview(self):
         if self.last_song is None:
             self.pattern_text.setPlainText("")

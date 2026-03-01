@@ -127,3 +127,26 @@ def add_last_as_plugin(last_mod_path: Optional[Path], last_song: Any, log_cb: Lo
 
     _log(log_cb, f"Added melody plugin: {dest_dir.name}")
     return dest_dir
+
+
+def get_plugin_meta(name: str) -> dict[str, str]:
+    """Return metadata dict for a melody plugin (or empty dict)."""
+    try:
+        pl = getattr(backend, 'PLUGIN_MELODIES', {}).get(str(name))
+        if pl is None:
+            return {}
+        meta = getattr(pl, 'meta', None)
+        if isinstance(meta, dict):
+            return {str(k): str(v) for k, v in meta.items()}
+    except Exception:
+        return {}
+    return {}
+
+def get_recommended_pattern_order(name: str) -> str | None:
+    """Return recommended pattern order from plugin metadata (keys: pattern_order/order/order_hint)."""
+    meta = get_plugin_meta(name)
+    for k in ('pattern_order', 'order', 'order_hint'):
+        if k in meta and str(meta[k]).strip():
+            return str(meta[k]).strip()
+    return None
+

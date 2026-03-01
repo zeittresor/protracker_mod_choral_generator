@@ -125,7 +125,31 @@ def generate_song_once(cfg: SongConfig,
     try:
         root = getattr(song, "key_root", cfg.key_root_override or "C-2")
         scale = getattr(song, "scale_mode", cfg.scale_mode or "Auto")
-        q = evaluate_patterns_for_ralph(song.patterns, str(scale), str(root))
+        pats = song.patterns
+        # Optional: ignore drumset channels in Ralph scoring (prevents drum hits from hurting harmony/melody metrics)
+        try:
+            if bool(getattr(cfg, 'ralph_ignore_drumsets', True)):
+                drum_ch = set()
+                try:
+                    drum_ch = set(int(k) for k in getattr(song, 'drum_channel_styles', {}).keys())
+                except Exception:
+                    drum_ch = set(int(i) for i, kind in enumerate(getattr(cfg, 'instruments', []) or []) if backend.is_drumset_kind(str(kind)))
+                if drum_ch:
+                    # deep-ish copy patterns, blanking notes in drum channels
+                    pats2 = []
+                    for pat in pats:
+                        pat2 = []
+                        for row in pat:
+                            row2 = list(row)
+                            for ch in drum_ch:
+                                if 0 <= int(ch) < 4:
+                                    row2[int(ch)] = (None, 0, 0, 0)
+                            pat2.append(row2)
+                        pats2.append(pat2)
+                    pats = pats2
+        except Exception:
+            pats = song.patterns
+        q = evaluate_patterns_for_ralph(pats, str(scale), str(root))
     except Exception as e:
         _cb(log_cb, f"[quality] failed: {e}")
 
@@ -150,6 +174,23 @@ def generate_song_once(cfg: SongConfig,
     except Exception as e:
         _cb(log_cb, f"[fx] failed: {e}")
 
+    # Debug: drum channel activity (helps diagnose multi-drum setups)
+    try:
+        dcs = dict(getattr(song, 'drum_channel_styles', {}) or {})
+        if dcs:
+            for ch, st in sorted(dcs.items()):
+                hits = 0
+                for pat in getattr(song, 'patterns', []) or []:
+                    for row in pat:
+                        try:
+                            n, s, e, p = row[int(ch)]
+                            if n is not None and int(s) > 0:
+                                hits += 1
+                        except Exception:
+                            pass
+                _cb(log_cb, f"[drums] ch{int(ch)+1} style={st} hits={hits}")
+    except Exception:
+        pass
     _cb(progress_cb, 100)
     _cb(status_cb, "ready")
     return Path(path), song, q

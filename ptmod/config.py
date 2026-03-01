@@ -44,6 +44,7 @@ class SongConfig:
     ralph_loop: bool = False
     ralph_target_score: float = 90.0           # target for (harmony+melody)/2
     ralph_max_attempts: int = 50
+    ralph_ignore_drumsets: bool = True   # ignore drumset channels in Ralph quality scoring
 
     # FX injection (optional)
     fx_insert_initial_speed_tempo: bool = True

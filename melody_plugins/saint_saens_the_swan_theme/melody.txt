@@ -1,0 +1,18 @@
+name: C. Saint-Saëns - Le Cygne (The Swan) (Theme)
+mode: major
+preferred_key_range: G-2..G-2
+tempo_hint: 96
+pattern_order: 0,1,2,1,0,3,4,3,0,1,5,1,0,6
+
+G-2 4
+B-2 4
+D-3 4
+G-3 4
+F#3 2
+E-3 2
+D-3 4
+E-3 4
+D-3 4
+B-2 4
+A-2 4
+G-2 4

@@ -140,6 +140,7 @@ Hinweis: Custom WAVs werden als Preview direkt abgespielt; beim MOD-Export wird 
 - Aktiviert standardmäßig. Führt mehrere Generierungsversuche durch, bis der Zielscore erreicht ist.
 - Target %: Zielwert für (Harmony + Melody)/2.
 - Max attempts: maximale Versuche; der beste Versuch bleibt erhalten.
+- Ignore drumset channels: Drumset-Kanäle werden bei der Bewertung ignoriert (empfohlen).
 
 @{b}Theme@{ub}
 - Theme Dropdown + Apply: wechselt das QSS-Theme. Eigene Themes als *.qss in /themes ablegen.
