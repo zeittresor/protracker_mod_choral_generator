@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit e101607 (02.03.2026) v6.10):</b></i>
+<i><b>New in Commit e101607 (02.03.2026) v6.12):</b></i>
 
 - Hotfix added for a issue with the compatibility with the PT2Clone Project (https://github.com/8bitbubsy/pt2-clone)
   (btw. Thanks 8bitbubsy for the tips) 👍.
