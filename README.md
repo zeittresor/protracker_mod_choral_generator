@@ -7,6 +7,11 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>New in Commit e101607 (02.03.2026) v6.10):</b></i>
+
+- Hotfix added for a issue with the compatibility with the PT2Clone Project (https://github.com/8bitbubsy/pt2-clone)
+  (btw. Thanks 8bitbubsy for the tips) 👍.
+
 <i><b>New in Commit 9ad9c31 (01.03.2026) v6.10):</b></i>
 
 - Added vertical scrollbars for the app window (for monitors with a lower resolution)
