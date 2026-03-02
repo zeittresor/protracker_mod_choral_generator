@@ -3,6 +3,63 @@ Generate Audio Song files for Windows (and Amiga Protracker compatible) .mod fil
 
 Just start it and click "Generate". After a moment you can find a new song (each run different melody) in the output folder (where the script is).
 
+## Quick start (Windows)
+
+Double-click:
+
+- `run_windows.bat`
+
+It creates a `.venv`, installs dependencies, then launches `app.py`.
+
+
+## Quick start (Linux)
+
+1) Make the script executable (once):
+
+```bash
+chmod +x run_linux.sh
+```
+
+2) Run:
+
+```bash
+./run_linux.sh
+```
+
+### Linux notes (audio + Qt)
+
+- Playback prefers **QtMultimedia**. On many distros it needs **GStreamer plugins**.
+- If QtMultimedia cannot play (missing plugins), the app falls back to common system players (**paplay / aplay / ffplay**) when available.
+
+Typical packages:
+
+**Debian/Ubuntu:**
+```bash
+sudo apt update
+sudo apt install -y python3-venv gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav pulseaudio-utils alsa-utils
+```
+
+**Fedora:**
+```bash
+sudo dnf install -y python3-virtualenv gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-libav pulseaudio-utils alsa-utils
+```
+
+If you get an error about the Qt platform plugin `xcb`, install your distro's Qt6 XCB dependencies (package names vary; often includes `libxcb-cursor0`, `libxkbcommon-x11-0`, etc.).
+
+## Manual start
+
+```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -r requirements.txt
+python app.py
+```
+
+
 <br>
 
 <b>Changelog:</b>
