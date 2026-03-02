@@ -1,0 +1,14 @@
+name: W. A. Mozart - Eine kleine Nachtmusik (Theme)
+mode: major
+preferred_key_range: G-2..G-2
+tempo_hint: 132
+pattern_order: 0,1,0,2,0,1,3,4,3,5,6,5,3,2,1,0
+
+G-3 4
+D-3 2
+G-3 2
+B-3 4
+A-3 4
+G-3 4
+F#3 4
+G-3 8
