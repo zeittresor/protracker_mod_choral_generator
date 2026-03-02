@@ -1,4 +1,0 @@
-name: Kalinka
-origin: Traditional / public domain
-mode: minor
-tempo_hint: 130

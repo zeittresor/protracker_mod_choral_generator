@@ -1,4 +1,0 @@
-name: Scarborough Fair
-origin: Traditional (public domain melody)
-mode: dorian
-tempo_hint: 90

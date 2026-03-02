@@ -1,4 +1,0 @@
-name: Ode to Joy (Beethoven)
-origin: Public domain (19th century)
-mode: major
-tempo_hint: 110

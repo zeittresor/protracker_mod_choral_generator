@@ -1,5 +1,0 @@
-mode: minor
-tempo_hint: 90-140
-tempo_min: 90
-tempo_max: 140
-preferred_key_range: C-2..G-2

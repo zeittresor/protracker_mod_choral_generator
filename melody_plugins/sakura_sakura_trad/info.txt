@@ -1,4 +1,0 @@
-name: Sakura Sakura
-origin: Traditional
-mode: minor
-tempo_hint: 80
