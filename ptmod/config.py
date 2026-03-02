@@ -35,6 +35,7 @@ class SongConfig:
     disable_vibrato: bool = False
     fadeout_pattern: bool = True
     compat_mode: bool = True                   # tracker compatibility safeguards
+    pt2_compat_mode: bool = True              # stricter PT2-clone friendly output (fixes "???" notes)
     mod_signature: Optional[str] = None         # M.K. / M!K! / 4CHN etc
 
     # Quality

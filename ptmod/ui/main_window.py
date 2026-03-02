@@ -531,8 +531,14 @@ class MainWindow(QMainWindow):
         # Compatibility / signature
         grp_comp = QGroupBox(self.i18n.tr("Compatibility"))
         gc = QGridLayout(grp_comp)
-        self.opt_compat = QCheckBox("compat_mode")
+        self.opt_compat = QCheckBox(self.i18n.tr("ProTracker 2 Compatibility Mode"))
         self.opt_compat.setChecked(True)
+        self.opt_compat.setToolTip(
+            "Strict ProTracker 2 / PT2-clone output.\n"
+            "- Clamps notes into ProTracker range C-1 .. B-3\n"
+            "- Forces M.K. signature (4 channels)\n"
+            "- Sanitizes any off-table periods (avoids '???' notes)"
+        )
         gc.addWidget(self.opt_compat, 0, 0, 1, 2)
 
         gc.addWidget(QLabel(self.i18n.tr("MOD Signature")), 1, 0)
@@ -572,6 +578,10 @@ class MainWindow(QMainWindow):
         )
         gc.addWidget(self.opt_sig, 1, 1)
         layout.addWidget(grp_comp)
+
+        # When PT2 compatibility is enabled, force a ProTracker signature.
+        self.opt_compat.toggled.connect(self._on_pt2_compat_toggled)
+        self._on_pt2_compat_toggled(self.opt_compat.isChecked())
 
         # Ralph loop
         grp_r = QGroupBox(self.i18n.tr("Ralph-Loop"))
@@ -825,6 +835,7 @@ class MainWindow(QMainWindow):
         cfg.fadeout_pattern = bool(self.opt_fadeout.isChecked())
         cfg.enable_slowdown = bool(self.opt_slowdown.isChecked())
 
+        cfg.pt2_compat_mode = bool(self.opt_compat.isChecked())
         cfg.compat_mode = bool(self.opt_compat.isChecked())
         sig = self.opt_sig.currentData()
         cfg.mod_signature = str(sig) if sig else (self.opt_sig.currentText().strip()[:4] if self.opt_sig.currentText() else None)
@@ -1113,6 +1124,23 @@ class MainWindow(QMainWindow):
             subprocess.Popen([sys.executable, str(viewer), str(index)], cwd=str(root))
         except Exception as e:
             self._append_log(f"[help] failed to launch viewer: {e}")
+
+
+    # ---------- compatibility ----------
+    def _on_pt2_compat_toggled(self, checked: bool):
+        """PT2 clone / ProTracker 2 is strict: force a canonical 4ch signature."""
+        try:
+            if checked:
+                # Force to M.K. in UI and prevent user from selecting tags that PT2 won't accept.
+                for i in range(self.opt_sig.count()):
+                    if str(self.opt_sig.itemData(i)) == "M.K.":
+                        self.opt_sig.setCurrentIndex(i)
+                        break
+                self.opt_sig.setEnabled(False)
+            else:
+                self.opt_sig.setEnabled(True)
+        except Exception:
+            pass
 
 
     # ---------- theme ----------

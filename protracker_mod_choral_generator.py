@@ -38,6 +38,16 @@ PERIODS: dict[str, int] = {
     "C-3": 428, "C#3": 404, "D-3": 381, "D#3": 360, "E-3": 339, "F-3": 320, "F#3": 302, "G-3": 285, "G#3": 269, "A-3": 254, "A#3": 240, "B-3": 226,
 }
 
+# Canonical ProTracker 2 (2.3D) note period table (finetune 0), exactly 3 octaves:
+# C-1 .. B-3. Some trackers display these as C-4 .. B-6.
+# PT2-clone will show "???" for notes outside this range.
+PT2_CANON_PERIODS: list[int] = [
+    1712, 1616, 1524, 1440, 1356, 1280, 1208, 1140, 1076, 1016, 960, 906,
+    856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
+    428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
+]
+PT2_CANON_PERIODS_SET = set(PT2_CANON_PERIODS)
+
 CHROMA = ["C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"]
 OCTAVES = [1, 2, 3]
 CHROMATIC = [f"{n}{o}" for o in OCTAVES for n in CHROMA]
@@ -119,7 +129,6 @@ ORDER_PRESETS = [
     "0, 6, 6, 1, 7, 7, 2, 8, 4, 9, 5",
     "0, 1, 2, 3, 6, 7, 8, 9, 5",
     "6, 1, 7, 2, 8, 4, 9, 5",
-    "0, 1, 2, 13, 2, 4, 5, 17",
     # new presets for patterns 0..19
     "0, 10, 6, 11, 2, 12, 7, 13, 4, 14, 9, 15, 5",
     "0, 1, 10, 11, 6, 12, 2, 13, 8, 14, 4, 15, 9, 16, 5",
@@ -1033,7 +1042,18 @@ REF_F0 = 261.63
 PT_BG = "#8f8f8f"
 
 
-MOD_SIGNATURE_CHOICES = ["M.K.", "M!K!"]
+MOD_SIGNATURE_CHOICES = [
+    "M.K.",   # ProTracker (classic)
+    "M!K!",   # ProTracker alt
+    "FLT4",   # StarTrekker / 4ch
+    "4CHN",   # FastTracker / 4ch
+    "N.T.",   # NoiseTracker (var)
+    "NSMS",   # NoiseTracker (var)
+    # 8ch tags (WARNING: this generator still outputs 4 channels)
+    "OKTA",   # Oktalyzer
+    "FLT8",   # StarTrekker / 8ch tag
+    "8CHN",   # FastTracker / 8ch tag
+]
 DEFAULT_MOD_SIGNATURE = "M!K!"  # tends to be accepted by more players
 
 INSTRUMENT_CHOICES = [
@@ -1171,6 +1191,70 @@ def note_shift_safe(note: str, semitones: int) -> str:
     if 0 <= j < len(CHROMATIC):
         return CHROMATIC[j]
     return note
+
+
+def coerce_note_to_pt_range(note: str | None) -> str | None:
+    """Coerce various tracker note naming schemes into ProTracker's C-1..B-3 range.
+
+    Accepts notes like:
+      - ProTracker style: C-1, D#2, F#3
+      - FastTracker-style naturals: C1, G3
+      - With dashes: C-4, G-0 (will be octave-shifted into 1..3)
+      - Flats: Bb2, Eb3 (converted to sharps)
+    Returns a ProTracker note name (C-1..B-3) or None.
+    """
+    if note is None:
+        return None
+    t = str(note).strip()
+    if not t:
+        return None
+    # Already canonical
+    if t in CHROMATIC_SET:
+        return t
+
+    m = re.match(r"^\s*([A-Ga-g])\s*([#bB\-]?)\s*-?\s*(\d)\s*$", t)
+    if not m:
+        return None
+    n = m.group(1).upper()
+    acc = m.group(2)
+    octv = int(m.group(3))
+
+    # normalize accidental
+    if acc in ("b", "B"):
+        flat_map = {"DB": "C#", "EB": "D#", "GB": "F#", "AB": "G#", "BB": "A#"}
+        n = flat_map.get(n + "B", n)
+        acc = "#" if len(n) == 2 and n[1] == "#" else "-"
+    elif acc == "#":
+        n = n + "#"
+    else:
+        # natural or explicit '-'
+        acc = "-"
+
+    # clamp octave to ProTracker 1..3
+    octv = max(1, min(3, octv))
+    # build canonical key (PERIODS uses C-1, D#2, F#3)
+    if n.endswith("#"):
+        cand = f"{n}{octv}"
+    else:
+        cand = f"{n}-{octv}"
+    return cand if cand in CHROMATIC_SET else None
+
+
+def sanitize_patterns_note_range_pt2(patterns) -> int:
+    """Clamp any out-of-range note names into ProTracker's C-1..B-3 table.
+
+    Returns number of corrected cells.
+    """
+    fixes = 0
+    for p_i, pat in enumerate(patterns):
+        for r in range(64):
+            for ch in range(4):
+                note, samp, eff, par = pat[r][ch]
+                n2 = coerce_note_to_pt_range(note)
+                if note != n2:
+                    pat[r][ch] = (n2, samp, eff, par)
+                    fixes += 1
+    return fixes
 
 
 
@@ -2901,6 +2985,44 @@ def patterns_to_bytes(patterns) -> bytes:
     return bytes(blob)
 
 
+
+def sanitize_pattern_bytes_pt2(pat_data: bytes) -> tuple[bytes, int]:
+    """
+    PT2-clone friendliness: ensure all periods are either 0 or one of the canonical
+    ProTracker period table values. If a period is off-table, quantize it to the nearest
+    valid period so PT2 doesn't display "???".
+    """
+    if not pat_data:
+        return pat_data, 0
+    # IMPORTANT: Do not use PERIODS.values() here, because other modes may
+    # expand PERIODS for non-PT trackers. PT2 compatibility must be restricted
+    # to the classic 3-octave ProTracker table.
+    valid = PT2_CANON_PERIODS
+
+    def nearest_period(p: int) -> int:
+        # periods are small lists, brute-force is fine
+        best = valid[0]
+        best_d = abs(best - p)
+        for v in valid[1:]:
+            d = abs(v - p)
+            if d < best_d:
+                best, best_d = v, d
+        return best
+
+    raw = bytearray(pat_data)
+    fixes = 0
+    # each cell is 4 bytes
+    for i in range(0, len(raw), 4):
+        b0 = raw[i]
+        b1 = raw[i+1]
+        period = ((b0 & 0x0F) << 8) | b1
+        if period != 0 and period not in PT2_CANON_PERIODS_SET:
+            np = nearest_period(period)
+            raw[i] = (b0 & 0xF0) | ((np >> 8) & 0x0F)
+            raw[i+1] = np & 0xFF
+            fixes += 1
+    return bytes(raw), fixes
+
 def parse_order_string(order_str: str) -> list[int]:
     parts = [p.strip() for p in re.split(r"[,\s]+", order_str.strip()) if p.strip()]
     if not parts:
@@ -3277,6 +3399,7 @@ def generate_song(
     octave_spans: list[int] | None = None,
     mod_signature: str | None = None,
     compat_mode: bool = True,
+    pt2_compat_mode: bool = True,
     fadeout_pattern: bool = False,
     quality_passes: int = 3,
 ) -> tuple[Path, SongData]:
@@ -3291,6 +3414,10 @@ def generate_song(
     sig = (mod_signature or DEFAULT_MOD_SIGNATURE).strip()
     if sig not in MOD_SIGNATURE_CHOICES:
         sig = DEFAULT_MOD_SIGNATURE
+
+    if pt2_compat_mode:
+        # PT2 clone / ProTracker 2: be conservative and use the classic ProTracker signature.
+        sig = "M.K."
 
     inst_kinds = normalize_instrument_list(instruments)
     # Determine which channels are drum tracks (based on chosen "instrument").
@@ -3353,6 +3480,11 @@ def generate_song(
 
     samples_float = [bytes_to_float_sample(b) for b in samples_bytes]
 
+    # PT2 clone / ProTracker 2 compatibility: ProTracker only supports 3 octaves
+    # (C-1..B-3). Keep octave spans within that table.
+    if pt2_compat_mode and octave_spans:
+        octave_spans = [max(1, min(3, int(x))) for x in octave_spans]
+
     patterns, key_root, base_melody, base_melody_meta, derive_used = make_patterns(
         rng,
         speed=speed,
@@ -3369,6 +3501,11 @@ def generate_song(
     # Inject drum patterns (if any channels use a drumset preset).
     if drum_channel_styles:
         apply_drumsets_to_patterns(patterns, rng, drum_channel_styles, drum_sample_numbers, variation=float(variation))
+
+    if pt2_compat_mode:
+        _nf = sanitize_patterns_note_range_pt2(patterns)
+        if _nf:
+            print(f"[pt2_compat] clamped {_nf} notes into ProTracker's C-1..B-3 range")
 
     # ==========================================
     # QUALITY CHECKING WITH HARMONY ANALYSIS (configurable passes)
@@ -3436,6 +3573,11 @@ def generate_song(
 
     pat_data = patterns_to_bytes(patterns)
 
+    if pt2_compat_mode:
+        pat_data, _fixes = sanitize_pattern_bytes_pt2(pat_data)
+        if _fixes:
+            print(f"[pt2_compat] quantized {_fixes} off-table periods to avoid \'???\' notes in PT2 clone")
+
     # Title
     section1 = ["The", "A", "A_dirty", "a_holy", "Another", "The_wildest", "A_crazy", "A_funny"]
     section2 = ["banana", "DJ", "pianist", "stardestroyer", "dentist", "pope", "dictator", "dancingqueen", "jungleman", "toilet", "strawberry"]
@@ -3443,11 +3585,14 @@ def generate_song(
     section4 = ["a_dancefloor__", "the_DJ__", "at_poolparty__", "a_busstation__", "in_heaven__", "ready_to_rock__", "disco__", "crazy__", "party__", "roll_around__", "fight__", "a_sausage__", "a_phonecall__"]
     title_txt = f"{rng.choice(section1)}_{rng.choice(section2)}_{rng.choice(section3)}_{rng.choice(section4)}_{rng.randint(1, 9999):04d}"
     title = title_txt.encode("ascii", "ignore")[:20].ljust(20, b"\x00")
+    # PT2 clone compatibility: sample lengths should be even (length stored in 16-bit words).
+    if pt2_compat_mode:
+        samples_bytes = [(sb if (len(sb) % 2 == 0) else (sb + b"\x00")) for sb in samples_bytes]
     # Instrument headers (exactly 31)
     insts: list[bytes] = []
     for nm, sb, vol in zip(sample_names, samples_bytes, sample_vols):
         insts.append(inst_header(nm, sb, volume=int(vol)))
-    empty_loop = 0 if compat_mode else 1
+    empty_loop = 1 if pt2_compat_mode else (0 if compat_mode else 1)
     empty = b"\x00" * 22 + struct.pack(">H", 0) + bytes([0]) + bytes([0]) + struct.pack(">H", 0) + struct.pack(">H", empty_loop)
     if len(insts) < 31:
         insts += [empty] * (31 - len(insts))
@@ -3462,7 +3607,7 @@ def generate_song(
     for ih in insts:
         mod += ih
     mod += bytes([song_len])
-    restart_byte = 0x7F if compat_mode else 0
+    restart_byte = 0x7F if (compat_mode or pt2_compat_mode) else 0
     mod += bytes([restart_byte])  # restart byte
     mod += order_table
     mod += sig.encode("ascii", "ignore")[:4].ljust(4, b" ")
