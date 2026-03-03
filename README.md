@@ -11,6 +11,7 @@ Double-click:
 
 It creates a `.venv`, installs dependencies, then launches `app.py`.
 
+Or use the latest windows executable release (takes a moment to start at first run).
 
 ## Quick start (Linux)
 
