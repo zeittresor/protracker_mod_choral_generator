@@ -7,7 +7,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
-<i><b>New in Commit x (04.03.2026) v6.13):</b></i>
+<i><b>New in Commit 14b74da (04.03.2026) v6.13):</b></i>
 
 - Melody Influence selectable under Options (How much of a plugin/preset song should have an influence 8/16/32/64 notes)
 
