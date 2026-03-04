@@ -3,67 +3,15 @@ Generate Audio Song files for Windows (and Amiga Protracker compatible) .mod fil
 
 Just start it and click "Generate". After a moment you can find a new song (each run different melody) in the output folder (where the script is).
 
-## Quick start (Windows)
 
-Double-click:
-
-- `run_windows.bat`
-
-It creates a `.venv`, installs dependencies, then launches `app.py`.
-
-Or use the latest windows executable release (takes a moment to start at first run).
-
-## Quick start (Linux)
-
-1) Make the script executable (once):
-
-```bash
-chmod +x run_linux.sh
-```
-
-2) Run:
-
-```bash
-./run_linux.sh
-```
-
-### Linux notes (audio + Qt)
-
-- Playback prefers **QtMultimedia**. On many distros it needs **GStreamer plugins**.
-- If QtMultimedia cannot play (missing plugins), the app falls back to common system players (**paplay / aplay / ffplay**) when available.
-
-Typical packages:
-
-**Debian/Ubuntu:**
-```bash
-sudo apt update
-sudo apt install -y python3-venv gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav pulseaudio-utils alsa-utils
-```
-
-**Fedora:**
-```bash
-sudo dnf install -y python3-virtualenv gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-libav pulseaudio-utils alsa-utils
-```
-
-If you get an error about the Qt platform plugin `xcb`, install your distro's Qt6 XCB dependencies (package names vary; often includes `libxcb-cursor0`, `libxkbcommon-x11-0`, etc.).
-
-## Manual start
-
-```bash
-python -m venv .venv
-# Windows:
-.venv\Scripts\activate
-# Linux/macOS:
-source .venv/bin/activate
-
-pip install -r requirements.txt
-python app.py
-```
-
-
-<br>
 
 <b>Changelog:</b>
+
+<i><b>New in Commit x (04.03.2026) v6.13):</b></i>
+
+- Melody Influence selectable under Options (How much of a plugin/preset song should have an influence 8/16/32/64 notes)
+
+https://github.com/user-attachments/assets/0c886c8b-003e-44e4-9ba1-819d345dc81f
 
 <i><b>New in Commit e101607 (02.03.2026) v6.12):</b></i>
 
@@ -310,6 +258,66 @@ Added (optional) GUI for order editing and generation options (the GUI is disabl
  It was before "0, 1, 2, 3, 2, 4, 5" and now it is "0, 1, 2, 3, 2, 4, 1, 4, 2, 5" (makes each song a bit longer).
  
 <br><br>
+
+## Quick start (Windows)
+
+Double-click:
+
+- `run_windows.bat`
+
+It creates a `.venv`, installs dependencies, then launches `app.py`.
+
+Or use the latest windows executable release (takes a moment to start at first run).
+
+## Quick start (Linux)
+
+1) Make the script executable (once):
+
+```bash
+chmod +x run_linux.sh
+```
+
+2) Run:
+
+```bash
+./run_linux.sh
+```
+
+### Linux notes (audio + Qt)
+
+- Playback prefers **QtMultimedia**. On many distros it needs **GStreamer plugins**.
+- If QtMultimedia cannot play (missing plugins), the app falls back to common system players (**paplay / aplay / ffplay**) when available.
+
+Typical packages:
+
+**Debian/Ubuntu:**
+```bash
+sudo apt update
+sudo apt install -y python3-venv gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav pulseaudio-utils alsa-utils
+```
+
+**Fedora:**
+```bash
+sudo dnf install -y python3-virtualenv gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-libav pulseaudio-utils alsa-utils
+```
+
+If you get an error about the Qt platform plugin `xcb`, install your distro's Qt6 XCB dependencies (package names vary; often includes `libxcb-cursor0`, `libxkbcommon-x11-0`, etc.).
+
+## Manual start
+
+```bash
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# Linux/macOS:
+source .venv/bin/activate
+
+pip install -r requirements.txt
+python app.py
+```
+
+
+<br>
 
 <b>Some Notes: </b>
 
