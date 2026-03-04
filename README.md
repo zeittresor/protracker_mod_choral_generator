@@ -7,6 +7,10 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i>Projected Version from the future in five years.. v11 (Release year is 2031 !) .. v11.0 .. currently we have 2026 :-)</b></i>
+
+Look in the subfolder "v11 (Year 2031)". Might work or not i have not tested this at all xD
+
 <i><b>New in Commit 14b74da (04.03.2026) v6.13):</b></i>
 
 - Melody Influence selectable under Options (How much of a plugin/preset song should have an influence 8/16/32/64 notes)
