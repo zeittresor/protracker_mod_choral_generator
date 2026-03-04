@@ -10,6 +10,7 @@ Just start it and click "Generate". After a moment you can find a new song (each
 <i>Projected Version from the future in five years.. v11 (Release year is 2031 !) .. v11.0 .. currently we have 2026 :-)</b></i>
 
 Ok wowowowo, this is a little bit crazy i have asked a AI to project what and how i am might use AI for coding in the past to project it to the future in ~5 years.. this is the result.. i have no idea what the AI was doing in a hour of review / coding.. i have not tested this at all.. try on your own risk (as always) xD
+(Outside of main release version): https://github.com/zeittresor/protracker_mod_choral_generator/blob/main/v11%20(Year%202031)/protracker_music_generator_future_2031_v11.zip
 
 <i><b>New in Commit 14b74da (04.03.2026) v6.13):</b></i>
 
