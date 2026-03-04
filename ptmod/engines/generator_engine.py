@@ -99,6 +99,7 @@ def generate_song_once(cfg: SongConfig,
         mod_signature=cfg.mod_signature,
         compat_mode=bool(cfg.compat_mode),
         pt2_compat_mode=bool(getattr(cfg, "pt2_compat_mode", True)),
+        melody_influence_rows=int(getattr(cfg, 'melody_influence_rows', 64)),
         fadeout_pattern=bool(cfg.fadeout_pattern),
         quality_passes=int(cfg.quality_passes),
     )

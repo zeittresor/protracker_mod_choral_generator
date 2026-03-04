@@ -599,6 +599,37 @@ class MainWindow(QMainWindow):
         self.opt_r_ignore_drums.setChecked(True)
         self.opt_r_ignore_drums.setToolTip(self.i18n.tt("Ignore drumset channels"))
         gr.addWidget(self.opt_r_ignore_drums, 3, 0, 1, 2)
+        # Melody influence (how many rows of the base melody motif should shape the whole song)
+        grp_inf = QGroupBox(self.i18n.tr("Melody Influence"))
+        gi = QGridLayout(grp_inf)
+        gi.addWidget(QLabel(self.i18n.tr("Motif rows")), 0, 0)
+        self._influence_values = [8, 16, 32, 64]
+        self.inf_slider = QSlider(Qt.Orientation.Horizontal)
+        self.inf_slider.setRange(0, len(self._influence_values) - 1)
+        self.inf_slider.setValue(self._influence_values.index(64))
+        self.inf_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.inf_slider.setTickInterval(1)
+        self.inf_value_lbl = QLabel("64")
+        self.inf_value_lbl.setMinimumWidth(40)
+
+        def _upd_inf(v: int):
+            try:
+                self.inf_value_lbl.setText(str(self._influence_values[int(v)]))
+            except Exception:
+                self.inf_value_lbl.setText("64")
+        self.inf_slider.valueChanged.connect(_upd_inf)
+        _upd_inf(self.inf_slider.value())
+
+        gi.addWidget(self.inf_slider, 0, 1)
+        gi.addWidget(self.inf_value_lbl, 0, 2)
+
+        gi.addWidget(QLabel("8  |  16  |  32  |  64"), 1, 1, 1, 2)
+        grp_inf.setToolTip(
+            "How many rows from the selected base melody/preset should strongly influence the generated song.\n"
+            "64 = full 1-pattern motif, 8 = only a short hook."
+        )
+        layout.addWidget(grp_inf)
+
         layout.addWidget(grp_r)
 
         # Theme
@@ -813,6 +844,12 @@ class MainWindow(QMainWindow):
         cfg.derive_mode = self.derive_combo.currentText()
         k = self.key_edit.text().strip()
         cfg.key_root_override = k if k else None
+
+        # melody influence window (rows)
+        try:
+            cfg.melody_influence_rows = int(self._influence_values[int(self.inf_slider.value())])
+        except Exception:
+            cfg.melody_influence_rows = 64
 
         # speed/tempo
         cfg.speed = int(self.speed.value())

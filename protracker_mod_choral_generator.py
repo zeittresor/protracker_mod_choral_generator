@@ -2136,6 +2136,7 @@ def make_patterns(
     key_root_override: str | None = None,
     scale_mode: str | None = None,
     variation: float = 1.0,
+    melody_influence_rows: int = 64,
     octave_spans: list[int] | None = None,
     drum_channels: set[int] | None = None,
 ):
@@ -2196,6 +2197,73 @@ def make_patterns(
                 base_bars.append(build_bar_melody(rng, scale=scale_up, chord=chord, base_note=chord[0]))
     else:
         base_bars = [_template_bar_to_events(scale_up, base_tpl[i]) for i in range(4)]
+
+    # Melody influence window: how much of the base melody (in rows) should be preserved
+    # when mutating / deriving the song. 64 = full pattern (4 bars * 16 rows).
+    try:
+        _mir = int(melody_influence_rows or 64)
+    except Exception:
+        _mir = 64
+    _mir = max(1, min(64, _mir))
+
+    def _expand_events_rows(ev: list[tuple[str | None, int]], rows: int = 16) -> list[str | None]:
+        out: list[str | None] = []
+        for n, d in ev:
+            dd = max(1, int(d))
+            for _ in range(dd):
+                if len(out) >= rows:
+                    break
+                out.append(n)
+            if len(out) >= rows:
+                break
+        while len(out) < rows:
+            out.append(None)
+        return out[:rows]
+
+    def _compress_rows_events(rows_list: list[str | None]) -> list[tuple[str | None, int]]:
+        if not rows_list:
+            return [(None, 16)]
+        ev2: list[tuple[str | None, int]] = []
+        cur = rows_list[0]
+        run = 1
+        for x in rows_list[1:]:
+            if x == cur:
+                run += 1
+            else:
+                ev2.append((cur, int(run)))
+                cur = x
+                run = 1
+        ev2.append((cur, int(run)))
+        # Ensure 16 rows sum for downstream logic
+        tot = sum(int(d) for _, d in ev2)
+        if tot < 16:
+            ev2.append((None, 16 - tot))
+        elif tot > 16:
+            # trim (shouldn't happen with our caller)
+            rem = 16
+            out3: list[tuple[str | None, int]] = []
+            for n, d in ev2:
+                if rem <= 0:
+                    break
+                dd = min(int(d), rem)
+                out3.append((n, dd))
+                rem -= dd
+            ev2 = out3
+        return ev2
+
+    def _apply_melody_influence_lock(bar_idx: int, base_ev: list[tuple[str | None, int]], mut_ev: list[tuple[str | None, int]]) -> list[tuple[str | None, int]]:
+        # Lock the first N rows of the overall 64-row base pattern.
+        if _mir >= 64:
+            return mut_ev
+        lock = _mir - (int(bar_idx) * 16)
+        if lock <= 0:
+            return mut_ev
+        lock = min(16, int(lock))
+        b = _expand_events_rows(base_ev, 16)
+        m = _expand_events_rows(mut_ev, 16)
+        for i in range(lock):
+            m[i] = b[i]
+        return _compress_rows_events(m)
 
     N_PAT = PATTERN_COUNT
     for _ in range(N_PAT):
@@ -2474,6 +2542,7 @@ def make_patterns(
                 v = max(0.0, min(1.5, v))
                 st = (0.70 + 0.55 * v) if dm.startswith('n') or dm.startswith('c') else (0.95 + 0.70 * v)
                 bar_events = _mutate_events(rng, base_bars[bar], bar_scale_up, mode, strength=st)
+                bar_events = _apply_melody_influence_lock(bar, base_bars[bar], bar_events)
                 strong_note = next((n for (n, _) in bar_events if n is not None), bar_scale_up[0])
 
             def _chord_up_for_degree(d: int, sc: list[str], sc_up0: str):
@@ -2799,6 +2868,7 @@ def apply_drumsets_to_patterns(
     drum_channel_styles: dict[int, str],
     drum_sample_numbers: dict[str, dict[str, int]],
     variation: float = 1.0,
+    melody_influence_rows: int = 64,
 ) -> None:
     """Overwrite selected channels with style-appropriate drum patterns.
 
@@ -3394,6 +3464,7 @@ def generate_song(
     key_root_override: str | None = None,
     scale_mode: str | None = None,
     variation: float = 1.0,
+    melody_influence_rows: int = 64,
     mute_channels: list[bool] | None = None,
     stereo_width: float = 1.0,
     octave_spans: list[int] | None = None,
@@ -3494,6 +3565,7 @@ def generate_song(
         key_root_override=key_root_override,
         scale_mode=scale_mode,
         variation=variation,
+        melody_influence_rows=int(melody_influence_rows),
         octave_spans=octave_spans,
         drum_channels=set(drum_channel_styles.keys()),
     )

@@ -21,6 +21,7 @@ class SongConfig:
     instruments: List[str] = field(default_factory=lambda: ["Piano","Piano","Piano","Piano"])
     octave_spans: List[int] = field(default_factory=lambda: [3,3,2,3])  # CH3 default 2 like Tk UI
     melody_name: Optional[str] = None          # None means Random
+    melody_influence_rows: int = 64            # 8/16/32/64 rows from base melody influence (64 = full pattern)
     derive_mode: str = "Random"                # Random / Near / Far
     key_root_override: Optional[str] = None    # e.g. C-2
     scale_mode: str = "Auto"                   # Auto/Major/Minor/Mixed/Dorian/Mixolydian
