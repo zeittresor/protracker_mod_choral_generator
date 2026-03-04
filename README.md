@@ -19,8 +19,6 @@ https://github.com/user-attachments/assets/0c886c8b-003e-44e4-9ba1-819d345dc81f
 - Hotfix added for a issue with the compatibility with the PT2Clone Project (https://github.com/8bitbubsy/pt2-clone)
 - Compiled Windows executable for Windows added (v6.12)
 
-https://github.com/user-attachments/assets/3675bf17-e072-40a0-b47a-be7cb615518b
-
 <i><b>New in Commit 9ad9c31 (01.03.2026) v6.10):</b></i>
 
 - Added vertical scrollbars for the app window (for monitors with a lower resolution)
