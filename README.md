@@ -36,8 +36,6 @@ https://github.com/user-attachments/assets/3675bf17-e072-40a0-b47a-be7cb615518b
 - Added Option for Ralph Loop option to ignore Drumsets
 - Help System added (in options tab) based upon the Amiga Guide fileformat (incl. viewer for Windows / Linux)
 - Bug fixes
-  
-<img width="2560" height="1040" alt="69" src="https://github.com/user-attachments/assets/33512d9d-077e-4cb3-99f6-b6028010cfd4" />
 
 https://github.com/user-attachments/assets/646c4fe5-f415-4d6b-82bf-0d11f93ca2a9
 
