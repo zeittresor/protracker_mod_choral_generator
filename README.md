@@ -7,6 +7,15 @@ Just start it and click "Generate". After a moment you can find a new song (each
 
 <b>Changelog:</b>
 
+<i><b>Update News (18.03.2026 / Tools)</b></i>
+
+29 years, 4 month and 7 days ago on a Amiga 2000 computer i have created the original mod. now it is a example source for my new extension for "what ever i am currently developer here" ;-) under "tools" is a converter to convert any instruments of a mod file to a single instrument to use it as a "soul" plugin for new songs. the "soul" plugin is not ready for release yet (until now) but i am still working on it. :-)
+
+Example (tools / modconv) Output:
+
+https://github.com/user-attachments/assets/2b92a8e6-8d46-4e1a-a662-b37cbdb4b400
+
+If you would like to hear some real outputs of the current main state scroll down.. there are some examples..
 
 <i><b>New in Commit 14b74da (04.03.2026) v6.13):</b></i>
 
